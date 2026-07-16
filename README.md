@@ -12,6 +12,72 @@ doesn't reimplement runner registration; it makes the parts around ARC
 (GitHub App setup, per-repo onboarding, node sizing, cluster health) fast
 and safe to operate.
 
+## Topology
+
+One logical cluster, spanning as many nodes as you join to it over
+Tailscale (`node:init`/`node:join`/`node:auto`) — **not** multiple
+independent clusters; there's no cross-cluster federation here. A small
+node can host the control plane and lightweight listener pods while a
+big node (or several) takes the actual job workload, and a laptop stays
+a valid node even after it leaves your LAN:
+
+```mermaid
+flowchart TB
+    subgraph GH["GitHub"]
+        RepoA[owner/repo-a]
+        RepoB[owner/repo-b]
+    end
+
+    subgraph TS["Tailscale mesh"]
+        subgraph Small["Node: small (runner-mesh.dev/size=small)"]
+            ARC[ARC controller\narc-systems]
+            LA[listener: repo-a]
+            LB[listener: repo-b]
+        end
+
+        subgraph Large["Node: large (runner-mesh.dev/size=large)"]
+            RA[ephemeral runner pod\nrepo-a job]
+            RB[ephemeral runner pod\nrepo-b job]
+        end
+
+        subgraph Roaming["Node: laptop (off-LAN, still tailnet-reachable)"]
+            RA2[ephemeral runner pod\nrepo-a job, when scheduled here]
+        end
+    end
+
+    RepoA -. job queued .-> LA
+    RepoB -. job queued .-> LB
+    ARC -.reconciles.-> LA
+    ARC -.reconciles.-> LB
+    LA -- creates --> RA
+    LA -- creates --> RA2
+    LB -- creates --> RB
+```
+
+The controller and listener pods are cheap and stay put on the small
+node; job pods — the only thing that actually needs CPU/memory headroom —
+land on `large` via `nodeSelector`, or on whichever node is available if
+you haven't tiered your nodes. See
+[`docs/architecture.md`](docs/architecture.md) for the namespace-mode and
+runner-limit details behind this picture.
+
+### One job's lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: minRunners 0, no pod exists
+    Idle --> TokenMinted: job queued, listener\nrequests a JIT token
+    TokenMinted --> PodScheduled: ARC creates an\nephemeral runner Pod
+    PodScheduled --> Registering: Pod starts, registers\nwith the JIT token
+    Registering --> Running: job executes
+    Running --> Deregistering: job finishes
+    Deregistering --> Terminated: Pod exits,\nk8s garbage-collects it
+    Terminated --> Idle
+```
+
+No long-lived registration token, no idle pod between jobs — every state
+after `Idle` exists only for the lifetime of one job.
+
 ## Why
 
 Running a fixed pair of always-on Docker containers as self-hosted runners
