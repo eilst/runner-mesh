@@ -2,64 +2,77 @@
 
 Ephemeral, autoscaling GitHub Actions runners on **your own** Kubernetes
 cluster — no fixed containers idling 24/7, no per-repo hand registration,
-namespace-isolated per repository, authenticated as a scoped GitHub App
-instead of a personal access token.
+scale-to-zero pools per repo (and per size tier), authenticated as a
+scoped GitHub App instead of a personal access token, with your whole
+fleet declared in one small config repo.
 
 `runner-mesh` is a thin, opinionated CLI over
 [`actions/actions-runner-controller`](https://github.com/actions/actions-runner-controller)
 (ARC) — GitHub's own Kubernetes controller for self-hosted runners. It
-doesn't reimplement runner registration; it makes the parts around ARC
-(GitHub App setup, per-repo onboarding, node sizing, cluster health) fast
-and safe to operate.
+doesn't reimplement runner registration; it makes everything *around* ARC
+fast and safe to operate: GitHub App setup, per-repo onboarding, size-tier
+pools, workflow migration, declarative fleet config, and cluster health.
 
 ## Topology
 
 One logical cluster, spanning as many nodes as you join to it over
-Tailscale (`node:init`/`node:join`/`node:auto`) — **not** multiple
-independent clusters; there's no cross-cluster federation here. A small
-node can host the control plane and lightweight listener pods while a
-big node (or several) takes the actual job workload, and a laptop stays
-a valid node even after it leaves your LAN:
+Tailscale — a small node carries the control plane and listeners, big
+nodes carry job pods, and a laptop stays a valid node after it leaves
+your LAN. Everything is declared in a **fleet config repo** (data + a
+15-line shim; see [The fleet model](#the-fleet-model)):
 
 ```mermaid
 flowchart TB
+    Fleet["fleet config repo\nrepos.txt · values/ · engine pin"]
+
     subgraph GH["GitHub"]
         RepoA[owner/repo-a]
         RepoB[owner/repo-b]
     end
 
-    subgraph TS["Tailscale mesh"]
-        subgraph Small["Node: small (runner-mesh.dev/size=small)"]
-            ARC[ARC controller\narc-systems]
-            LA[listener: repo-a]
-            LB[listener: repo-b]
+    subgraph TS["Tailscale mesh — one k3s cluster"]
+        subgraph Small["node: small / arm64"]
+            direction TB
+            subgraph Sys["namespace: arc-systems"]
+                ARC[ARC controller]
+                LA[listener: repo-a]
+                LAL[listener: repo-a-large]
+                LB[listener: repo-b]
+            end
         end
 
-        subgraph Large["Node: large (runner-mesh.dev/size=large)"]
-            RA[ephemeral runner pod\nrepo-a job]
-            RB[ephemeral runner pod\nrepo-b job]
+        subgraph Big["node: large / amd64"]
+            RAL["ephemeral runner pod\nruns-on: owner-repo-a-large"]
         end
 
-        subgraph Roaming["Node: laptop (off-LAN, still tailnet-reachable)"]
-            RA2[ephemeral runner pod\nrepo-a job, when scheduled here]
+        subgraph Roam["node: laptop (off-LAN, tailnet-reachable)"]
+            RA["ephemeral runner pod\nruns-on: owner-repo-a"]
         end
     end
 
-    RepoA -. job queued .-> LA
-    RepoB -. job queued .-> LB
-    ARC -.reconciles.-> LA
-    ARC -.reconciles.-> LB
+    Fleet -- "make apply (any machine)" --> ARC
+    RepoA -. jobs .-> LA
+    RepoA -. large jobs .-> LAL
+    RepoB -. jobs .-> LB
     LA -- creates --> RA
-    LA -- creates --> RA2
-    LB -- creates --> RB
+    LAL -- "creates (nodeSelector:\nsize=large, arch=amd64)" --> RAL
 ```
 
-The controller and listener pods are cheap and stay put on the small
-node; job pods — the only thing that actually needs CPU/memory headroom —
-land on `large` via `nodeSelector`, or on whichever node is available if
-you haven't tiered your nodes. See
-[`docs/architecture.md`](docs/architecture.md) for the namespace-mode and
-runner-limit details behind this picture.
+Three routing facts the diagram encodes, each verified against a live
+cluster rather than assumed:
+
+1. **GitHub routes a job to a pool by NAME only** (`runs-on: owner-repo`)
+   — ARC scale-sets have no labels; that's a deliberate GitHub design.
+   Size tiers are therefore *separate named pools* (`owner/repo@large` →
+   `runs-on: owner-repo-large`), not labels.
+2. **Kubernetes routes a pool's pods to nodes** via each pool's
+   `nodeSelector` — size, CPU architecture, GPU, anything a node can be
+   labeled with.
+3. **Listener pods always live in the controller's namespace**
+   (`arc-systems`), regardless of namespace mode — only the ephemeral
+   job pods land in the runners namespace. See
+   [`docs/architecture.md`](docs/architecture.md) for what that means
+   for isolation.
 
 ### One job's lifecycle
 
@@ -80,120 +93,115 @@ after `Idle` exists only for the lifetime of one job.
 
 ## Why
 
-Running a fixed pair of always-on Docker containers as self-hosted runners
-works, but it doesn't scale with job volume, wastes resources at idle, has
-no per-repo isolation, and typically relies on a long-lived token. ARC
-fixes the underlying mechanics — scale-to-zero, JIT per-job tokens,
-Kubernetes-native scheduling — but wiring it up (GitHub App, per-repo
-scale-sets, namespaces, node sizing) is enough manual YAML that most
-homelab/small-team setups skip it. `runner-mesh` is that wiring, scripted
-and idempotent.
+Running fixed, always-on containers as self-hosted runners works, but it
+doesn't scale with job volume, wastes resources at idle, has no per-repo
+isolation, and relies on long-lived tokens. ARC fixes the mechanics —
+scale-to-zero, JIT per-job tokens, Kubernetes-native scheduling — but
+wiring it up (GitHub App, per-repo scale-sets, size tiers, workflow
+`runs-on` migration, multi-machine config drift) is enough work that most
+homelab/small-team setups never get there. `runner-mesh` is that wiring,
+scripted, idempotent, and declared in git.
 
-## What you get
+## The fleet model
 
-- **Scale-to-zero**: `minRunners: 0` by default — a runner pod only exists
-  while a job is actually queued or running.
-- **Configurable namespace layout**: repos share one namespace by default
-  (`RM_NAMESPACE_MODE=shared` — fewer objects, since a GitHub App
-  installation's credentials are identical across every repo it covers
-  anyway), or opt into `per-repo` for namespace-scoped Secret isolation.
-  Neither mode enforces network isolation between repos without your own
-  `NetworkPolicy` yet — see [`docs/security.md`](docs/security.md) for the
-  honest current boundary.
-- **GitHub App auth**, not a PAT: scoped, revocable, not tied to your
-  personal account. `app:init` automates everything except the one
-  GitHub-mandated browser click. See
-  [`docs/github-app-setup.md`](docs/github-app-setup.md).
-- **No GitHub org required**: GitHub's own org-level runners need an org
-  you administer, full stop — there's no equivalent for personal accounts.
-  GitHub Apps don't have that restriction: you can create one on your
-  personal account and install it on any personal repos you own, so
-  `runner-mesh` works the same way whether your repos live under an org or
-  under your personal account. This is *why* the tool is built on the App
-  model instead of org runner groups — see
-  ["Why this works without a GitHub org"](docs/github-app-setup.md#why-this-works-without-a-github-org).
-- **Two-layer runner limits**: business-level `maxRunners` per repo, plus
-  real pod `resources.requests`/`limits` as the physical ceiling — both
-  configurable, neither alone sufficient. See
-  [`docs/architecture.md`](docs/architecture.md).
-- **Bring-your-own-cluster, or plan a new one**: works against any
-  `kubectl` context — colima (`--kubernetes`), k3d, bare-metal k3s,
-  anything conformant. For a real multi-machine cluster (including a
-  laptop that leaves your LAN), `node:init`/`node:join`/`node:auto` plan a
-  Tailscale-meshed k3s bootstrap — same two secrets on every machine for
-  `node:auto`. These print the exact commands rather than running
-  `curl | sudo sh` on your behalf on principle, not as a missing feature —
-  see [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md).
-
-## Quickstart
-
-The fastest path to seeing this work end-to-end is a local disposable
-cluster — see [`docs/quickstart-colima.md`](docs/quickstart-colima.md) for
-the full walkthrough. Short version:
+All logic lives in this versioned engine; your config lives in a tiny
+private repo that `fleet:init` generates — `repos.txt` (which repos get
+pools, including `@profile` size tiers), `values/` (committed per-pool
+overrides), an engine version pin, a Makefile, and a ~15-line shim that
+fetches the pinned engine and delegates. The Gradle-wrapper pattern:
+config repos are data, never fork the tool.
 
 ```bash
-colima start --kubernetes
-kubectl config use-context colima
-
-./bin/runner-mesh doctor            # verify toolchain + cluster
-./bin/runner-mesh cluster:install   # install the ARC controller (once)
-./bin/runner-mesh app:init          # create a GitHub App (one browser click)
-./bin/runner-mesh repos:list        # see repos the App can access
-./bin/runner-mesh repos:add         # interactively pick which get runners
-./bin/runner-mesh status            # controller + per-repo health
+runner-mesh fleet:init my-fleet     # scaffold it
+cd my-fleet && $EDITOR repos.txt    # declare your repos (owner/repo, owner/repo@large, …)
+make apply                          # converge any machine on the declared state
+make prune                          # apply + remove pools no longer declared
 ```
+
+Every machine that clones the fleet repo and runs `make apply` converges
+on the same state — pools are cluster-wide, so a new machine adds
+capacity, not configuration.
+
+## Quickstart (single machine, ~10 minutes)
+
+```bash
+colima start --kubernetes           # or any kubectl-reachable cluster
+./bin/runner-mesh doctor            # verify toolchain + cluster
+./bin/runner-mesh cluster:install   # ARC controller (once per cluster)
+./bin/runner-mesh app:init          # create a GitHub App (one browser click)
+./bin/runner-mesh repos:add         # interactively pick repos to provision
+./bin/runner-mesh status            # controller + per-pool health
+```
+
+Then point a workflow at the pool (`runs-on: <owner>-<repo>`) and watch a
+runner pod get born, run the job, and die: `kubectl get pods -n arc-runners --watch`.
+
+Full walkthrough: [`docs/quickstart-colima.md`](docs/quickstart-colima.md).
+Migrating existing workflows off label arrays: `repos:audit` tells you
+what's unreachable and `repos:migrate --pr` opens the fix as a draft PR —
+see the command table.
 
 ## Prerequisites
 
-- `bash` >= 5
-- `kubectl`, pointed at a cluster you control
-- `helm` >= 3.14
-- `gh` CLI, authenticated
-- `jq`, `python3`, `openssl`
-
-`./bin/runner-mesh doctor` checks all of the above and tells you exactly
-what's missing.
+`bash` >= 5, `kubectl` (pointed at a cluster you control), `helm` >= 3.14,
+`gh` (authenticated), `jq`, `python3`, `openssl`. `doctor` checks all of
+them and tells you exactly what's missing.
 
 ## Commands
 
 | Command | Does |
 |---|---|
 | `doctor` | Verify local toolchain and cluster connectivity |
-| `node:init` | Print the plan to bootstrap the first Tailscale-meshed k3s node |
-| `node:join` | Print the plan to join an existing cluster |
-| `node:auto` | Read-only discovery + print init or join plan automatically |
-| `cluster:install` | Install/upgrade the ARC controller (cluster-wide, once) |
-| `cluster:uninstall` | Remove the controller |
-| `app:init` | Create a GitHub App via the manifest flow, store credentials |
-| `repos:list` | List repos the App can see and their provisioned state |
-| `repos:add [owner/repo ...]` | Provision a runner pool (interactive if no args) |
-| `repos:remove <owner/repo>` | Tear down a repo's runner pool |
-| `status` | Controller + per-repo runner pool health |
+| `fleet:init [dir]` | Scaffold a data-only fleet config repo (repos, pins, values, shim, Makefile) |
+| `fleet:apply [dir] [--prune]` | Converge the cluster on the declared state; `--prune` removes undeclared pools |
+| `cluster:install` / `cluster:uninstall` | ARC controller lifecycle (cluster-wide, once) |
+| `app:init` | Create a GitHub App via the manifest flow, store credentials locally |
+| `repos:list` | Repos the App can see, and their provisioned state |
+| `repos:add [owner/repo[@profile] ...]` | Provision a pool — `@large` makes a separate size-tier pool (`runs-on: owner-repo-large`) |
+| `repos:remove <owner/repo[@profile]>` | Tear down a pool (waits for GitHub deregistration before removing credentials) |
+| `repos:audit [path]` | Which of a checkout's `runs-on` targets actually reach a pool — label arrays never do |
+| `repos:migrate <path> --map 'labels=name' [--pr]` | Rewrite `runs-on` per an explicit mapping; `--pr` opens a draft PR, never touches the default branch |
+| `node:init` / `node:join` / `node:auto` | Print (never auto-execute) the Tailscale-meshed k3s bootstrap plan for a machine — colima-aware on macOS |
+| `status` | Controller + per-pool listener/runner health |
 
 Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — components, isolation
-  model, runner-limit layers, node sizing
+- [`docs/architecture.md`](docs/architecture.md) — components, namespace
+  modes, the real isolation boundaries, runner-limit layers, node sizing
 - [`docs/github-app-setup.md`](docs/github-app-setup.md) — the manifest
-  flow, what's automated vs. the one manual step
+  flow; why this works without a GitHub org
 - [`docs/quickstart-colima.md`](docs/quickstart-colima.md) — end-to-end
   local walkthrough
 - [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md) — joining multiple
-  machines (including ones that leave your LAN) into one cluster
+  machines (including macOS-via-colima and roaming laptops) into one cluster
 - [`docs/security.md`](docs/security.md) — threat model and hardening
   checklist
 - [`docs/roadmap.md`](docs/roadmap.md) — what's implemented vs. designed
 
 ## Status
 
-Pre-1.0, actively developed. The core loop (controller install, GitHub App
-setup, per-repo provisioning, status) is implemented and CI-tested against
-a real k3d cluster on every push. `node:*` cluster bootstrap plans a real
-Tailscale-meshed k3s cluster but hasn't been exercised against a real
-Linux host by the person who wrote it — validate on your own hardware
-before depending on it, and see the roadmap for what else is still ahead.
+Pre-1.0, actively developed. What's *validated* vs. merely *implemented*,
+stated precisely (updated 2026-07-16):
+
+**Validated against a real cluster and a real repository** — controller
+install, GitHub App manifest flow, pool provisioning (base and `@profile`),
+listener registration with GitHub's broker, scale-up on queued jobs
+(runner pods created and jobs picked up), `fleet:init`/`fleet:apply`
+including a full apply → `--prune` teardown → re-apply cycle, `repos:audit`
+against a 76-job repo, and `repos:migrate` producing a real reviewed PR.
+Every push also re-runs CI against a throwaway k3d cluster, including the
+scaffolded fleet shim end-to-end.
+
+**Implemented but not yet fully proven** — no job has *completed green*
+on a pool yet (the first real runs were deliberately cancelled during a
+host-disk incident that also produced the current per-host `maxRunners`
+guidance); and `node:*` multi-machine bootstrap prints plans built to
+k3s's documented `--vpn-auth` contract but hasn't been exercised on real
+multi-machine hardware. Treat both as "verify on your hardware", and see
+[`docs/roadmap.md`](docs/roadmap.md) for what's next (registry-backed
+dind caching is the top known efficiency gap).
 
 ## Contributing
 
