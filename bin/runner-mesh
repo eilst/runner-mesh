@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# runner-mesh — bootstrap and operate a fleet of ephemeral, autoscaling
+# GitHub Actions runners (via Actions Runner Controller) on your own
+# Kubernetes cluster.
+set -euo pipefail
+
+rm::resolve_root() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -L "${src}" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "${src}")" && pwd)"
+    src="$(readlink "${src}")"
+    [[ "${src}" != /* ]] && src="${dir}/${src}"
+  done
+  cd -P "$(dirname "${src}")/.." && pwd
+}
+
+RM_ROOT="$(rm::resolve_root)"
+readonly RM_ROOT
+export RM_ROOT
+
+# Each lib is sourced if present, so the CLI stays runnable while a command's
+# implementation lands in its own commit.
+for _rm_lib in log preflight cluster github_app repos status; do
+  if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${RM_ROOT}/lib/${_rm_lib}.sh"
+  fi
+done
+unset _rm_lib
+
+rm::usage() {
+  cat <<'EOF'
+runner-mesh — self-hosted GitHub Actions runners on your own Kubernetes cluster
+
+USAGE
+  runner-mesh <command> [flags]
+
+COMMANDS
+  doctor              Verify local toolchain and cluster connectivity
+  cluster:install      Install/upgrade the Actions Runner Controller
+  cluster:uninstall    Remove the controller (repos must be removed first)
+  app:init              Create a GitHub App via the manifest flow and store its
+                        credentials as a cluster Secret
+  repos:list             List repos visible to the GitHub App and their status
+  repos:add <repo>       Provision a runner scale-set for owner/repo
+  repos:remove <repo>    Tear down the runner scale-set for owner/repo
+  status                Show controller + per-repo runner pool health
+  version               Print the runner-mesh version
+
+GLOBAL FLAGS
+  --yes, -y           Assume "yes" to confirmation prompts (non-interactive)
+  --dry-run           Print planned actions without applying them
+
+Run 'runner-mesh <command> --help' for command-specific flags.
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+
+  # Global flags can appear anywhere; scan and strip them.
+  local args=()
+  for a in "$@"; do
+    case "${a}" in
+      --yes|-y) export RM_YES=1 ;;
+      --dry-run) export RM_DRY_RUN=1 ;;
+      *) args+=("${a}") ;;
+    esac
+  done
+  set -- "${args[@]+"${args[@]}"}"
+
+  case "${cmd}" in
+    doctor)            rm::preflight::run ;;
+    cluster:install)   rm::cluster::install "$@" ;;
+    cluster:uninstall) rm::cluster::uninstall "$@" ;;
+    app:init)           rm::github_app::init "$@" ;;
+    repos:list)          rm::repos::list "$@" ;;
+    repos:add)           rm::repos::add "$@" ;;
+    repos:remove)        rm::repos::remove "$@" ;;
+    status)             rm::status::run "$@" ;;
+    version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;
+    -h|--help|help|"")  rm::usage ;;
+    *)
+      rm::warn "unknown command: ${cmd}"
+      rm::usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
