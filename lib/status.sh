@@ -11,11 +11,20 @@ rm::status::_controller() {
     rm::warn "not installed — run 'runner-mesh cluster:install'"
     return
   fi
-  local ready total
-  read -r ready total < <(kubectl -n "${ns}" get deployment \
-    -l app.kubernetes.io/name=gha-runner-scale-set-controller \
+  # Label verified via 'helm template' against the actual chart output —
+  # it's 'gha-rs-controller', not the full chart name.
+  local line ready total
+  line="$(kubectl -n "${ns}" get deployment \
+    -l app.kubernetes.io/name=gha-rs-controller \
     -o jsonpath='{range .items[*]}{.status.readyReplicas}{" "}{.status.replicas}{"\n"}{end}' 2>/dev/null \
-    | head -1)
+    | head -1)"
+  # 'read' returns non-zero on a line with no trailing newline (true here
+  # whenever kubectl finds zero matching deployments — empty output has no
+  # newline at all), which would otherwise kill the script under 'set -e';
+  # guard it explicitly rather than relying on read's own exit status.
+  if [[ -n "${line}" ]]; then
+    read -r ready total <<<"${line}"
+  fi
   if [[ "${ready:-0}" -ge 1 && "${ready:-0}" == "${total:-0}" ]]; then
     rm::ok "controller healthy (${ready}/${total} replicas ready)"
   else
@@ -36,6 +45,13 @@ rm::status::_repos() {
   local ns
   while IFS= read -r ns; do
     [[ -z "${ns}" ]] && continue
+    # Unlike the controller's Deployment label (verified via 'helm
+    # template'), listener and runner pods are created dynamically by the
+    # controller at runtime, not from this chart's static templates —
+    # there's no offline way to verify these label selectors against chart
+    # source. Treated as best-effort observability: kubectl returns exit 0
+    # with empty output for a selector that matches nothing, so a wrong
+    # label degrades to "unknown"/0 here rather than failing the command.
     local listener_status active_runners
     listener_status="$(kubectl -n "${ns}" get pods \
       -l 'app.kubernetes.io/component=runner-scale-set-listener' \
