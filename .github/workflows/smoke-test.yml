@@ -54,6 +54,36 @@ jobs:
       # GitHub App installation, which CI does not have credentials for.
       # See docs/quickstart-colima.md for the manual end-to-end walkthrough.
 
+      - name: fleet:init scaffold — files exist, generated code lints
+        run: |
+          ./bin/runner-mesh fleet:init /tmp/fleet
+          test -x /tmp/fleet/bootstrap.sh
+          for f in repos.txt runner-mesh.version Makefile .gitignore README.md values/README.md; do
+            test -f "/tmp/fleet/$f" || { echo "missing generated file: $f"; exit 1; }
+          done
+          bash -n /tmp/fleet/bootstrap.sh
+          shellcheck /tmp/fleet/bootstrap.sh
+          make -C /tmp/fleet -n apply prune status doctor k9s watch-runners >/dev/null
+
+      # The shim clones the engine from RUNNER_MESH_REPO (here: this very
+      # checkout, at this commit) and delegates to fleet:apply. Without App
+      # credentials the correct behavior is to stop at the app:init check —
+      # after preflight has passed — so assert exactly that failure mode:
+      # a zero exit or a different error both fail this step.
+      - name: bootstrap shim — fails closed at missing App credentials
+        run: |
+          echo "${GITHUB_SHA}" > /tmp/fleet/runner-mesh.version
+          set +e
+          out="$(cd /tmp/fleet && RUNNER_MESH_REPO="${GITHUB_WORKSPACE}" ./bootstrap.sh 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "${out}" | tail -3
+          if [ "${code}" -eq 0 ]; then
+            echo "expected bootstrap to fail without App credentials"; exit 1
+          fi
+          printf '%s\n' "${out}" | grep -q "app:init" \
+            || { echo "unexpected failure mode:"; printf '%s\n' "${out}"; exit 1; }
+
       - name: cluster:uninstall
         if: always()
         run: ./bin/runner-mesh --yes cluster:uninstall || true
