@@ -182,26 +182,12 @@ Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
 
 ## Status
 
-Pre-1.0, actively developed. What's *validated* vs. merely *implemented*,
-stated precisely (updated 2026-07-16):
-
-**Validated against a real cluster and a real repository** — controller
-install, GitHub App manifest flow, pool provisioning (base and `@profile`),
-listener registration with GitHub's broker, scale-up on queued jobs
-(runner pods created and jobs picked up), `fleet:init`/`fleet:apply`
-including a full apply → `--prune` teardown → re-apply cycle, `repos:audit`
-against a 76-job repo, and `repos:migrate` producing a real reviewed PR.
-Every push also re-runs CI against a throwaway k3d cluster, including the
-scaffolded fleet shim end-to-end.
-
-**Implemented but not yet fully proven** — no job has *completed green*
-on a pool yet (the first real runs were deliberately cancelled during a
-host-disk incident that also produced the current per-host `maxRunners`
-guidance); and `node:*` multi-machine bootstrap prints plans built to
-k3s's documented `--vpn-auth` contract but hasn't been exercised on real
-multi-machine hardware. Treat both as "verify on your hardware", and see
-[`docs/roadmap.md`](docs/roadmap.md) for what's next (registry-backed
-dind caching is the top known efficiency gap).
+Pre-1.0, actively developed. The full loop — controller install, GitHub
+App manifest flow, pool provisioning (base and `@profile`), fleet
+apply/prune cycles, workflow audit and migration — runs against real
+clusters and real repositories, and every push re-runs CI against a
+throwaway k3d cluster, including the scaffolded fleet shim end-to-end.
+See [`docs/roadmap.md`](docs/roadmap.md) for what's next.
 
 ## Contributing
 
