@@ -7,12 +7,6 @@ RM_ARC_NAMESPACE="${RM_ARC_NAMESPACE:-arc-systems}"
 RM_ARC_RELEASE="${RM_ARC_RELEASE:-arc}"
 RM_ARC_CHART="oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller"
 
-rm::cluster::_helm_flags() {
-  local flags=()
-  [[ "${RM_DRY_RUN:-0}" == "1" ]] && flags+=(--dry-run)
-  printf '%s\n' "${flags[@]+"${flags[@]}"}"
-}
-
 rm::cluster::install() {
   local values_file="${RM_ROOT}/charts/values/controller.values.yaml"
   local chart_version="${1:-}"
@@ -29,10 +23,7 @@ rm::cluster::install() {
     --wait --timeout 5m)
   [[ -f "${values_file}" ]] && cmd+=(-f "${values_file}")
   [[ -n "${chart_version}" ]] && cmd+=(--version "${chart_version}")
-
-  local extra_flags
-  mapfile -t extra_flags < <(rm::cluster::_helm_flags)
-  [[ ${#extra_flags[@]} -gt 0 ]] && cmd+=("${extra_flags[@]}")
+  [[ "${RM_DRY_RUN:-0}" == "1" ]] && cmd+=(--dry-run)
 
   rm::info "${cmd[*]}"
   "${cmd[@]}"
