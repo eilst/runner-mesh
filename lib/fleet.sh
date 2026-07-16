@@ -262,7 +262,7 @@ EOF
   cat > "${dir}/Makefile" <<'EOF'
 ENGINE := .runner-mesh/bin/runner-mesh
 
-.PHONY: apply prune status doctor k9s watch-runners
+.PHONY: apply prune status doctor seal net-init k9s watch-runners
 
 apply: ## converge this machine on the declared fleet state
 	./bootstrap.sh
@@ -275,6 +275,12 @@ status: ## controller + per-repo runner pool health
 
 doctor: ## verify toolchain and cluster connectivity
 	$(ENGINE) doctor
+
+seal: ## encrypt local operator credentials into this repo (commit after)
+	$(ENGINE) fleet:seal .
+
+net-init: ## one-time guided Tailscale setup (account, tag ACL, OAuth client)
+	$(ENGINE) net:init
 
 k9s: ## open k9s in the controller namespace (listeners live here too)
 	k9s -n arc-systems
