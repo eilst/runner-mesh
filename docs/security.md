@@ -26,6 +26,20 @@ reach:
   the same namespace, though a pod still needs it explicitly mounted or
   RBAC'd to read it, not just proximity.
 
+- **Listener pods are a separate, more centralized risk surface than
+  runner pods** — verified by running this for real, not just reading
+  chart source: every repo's listener pod lives in the controller's own
+  namespace (`arc-systems`), for **both** namespace modes. `runner-mesh`
+  doesn't control this placement; it's how ARC itself works. This means
+  `RM_NAMESPACE_MODE=per-repo` isolates where a *job* runs, but every
+  repo's listener process — plus the controller itself — are always
+  network-proximate to each other regardless of that setting. A listener
+  process only talks to GitHub's API and the Kubernetes API (to manage
+  its own `EphemeralRunnerSet`), so this is a narrower risk than an
+  arbitrary job pod, but it's a real gap in the isolation story `runner-mesh`
+  otherwise builds around namespace mode — there's currently no
+  configuration that changes it.
+
 It should **not**, with a correctly configured cluster, be able to reach
 the controller's namespace or the underlying node — but that containment
 is only as good as your `NetworkPolicy` and RBAC configuration, plus the
