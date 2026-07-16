@@ -236,3 +236,73 @@ rm::repos::remove() {
 
   rm::ok "${repo} runners removed"
 }
+
+# rm::repos::audit [path] — scan a local checkout's workflow files and report
+# whether each runs-on target will actually reach a provisioned scale-set.
+# Scale-set runners match by NAME ONLY — GitHub deliberately dropped label
+# routing for them — so classic '[self-hosted, linux]' arrays silently never
+# reach a scale-set. Grep-based and best-effort: single-line runs-on forms
+# are classified; multi-line lists and expressions are flagged for manual
+# review rather than guessed at.
+rm::repos::audit() {
+  local path="${1:-.}"
+  local wf_dir="${path}/.github/workflows"
+  [[ -d "${wf_dir}" ]] || rm::die "no workflows at ${wf_dir}"
+
+  # Provisioned scale-set names = Helm release names in arc-runners* namespaces.
+  local scale_sets
+  scale_sets="$(helm list --all-namespaces -o json 2>/dev/null \
+    | jq -r '.[] | select(.namespace == "arc-runners" or (.namespace | startswith("arc-runners-"))) | .name')"
+  if [[ -z "${scale_sets}" ]]; then
+    rm::warn "no provisioned scale-sets found on the current cluster — classifications below assume none"
+  fi
+
+  rm::log "Auditing runs-on targets in ${wf_dir}"
+  local ok=0 hosted=0 labels=0 unknown=0 dynamic=0
+
+  local line target count
+  while IFS= read -r line; do
+    count="${line%% *}"
+    target="${line#* }"
+
+    # Matching a literal '${{' GitHub expression, not expanding it.
+    # shellcheck disable=SC2016
+    if [[ "${target}" == *'${{'* ]]; then
+      printf '  %3s×  %-45s %s\n' "${count}" "${target}" "? dynamic expression — review manually" >&2
+      dynamic=$((dynamic + count))
+    elif [[ "${target}" == "["* ]]; then
+      printf '  %3s×  %-45s %s\n' "${count}" "${target}" "✗ label array — scale-sets match by name only, this NEVER reaches one" >&2
+      labels=$((labels + count))
+    elif [[ "${target}" =~ ^(ubuntu|macos|windows)- ]]; then
+      printf '  %3s×  %-45s %s\n' "${count}" "${target}" "· GitHub-hosted" >&2
+      hosted=$((hosted + count))
+    elif grep -qx "${target}" <<<"${scale_sets}"; then
+      printf '  %3s×  %-45s %s\n' "${count}" "${target}" "✓ provisioned scale-set" >&2
+      ok=$((ok + count))
+    else
+      printf '  %3s×  %-45s %s\n' "${count}" "${target}" "✗ no scale-set with this name" >&2
+      unknown=$((unknown + count))
+    fi
+  done < <(grep -rhE '^[[:space:]]*runs-on:' "${wf_dir}"/*.y*ml 2>/dev/null \
+    | sed -E 's/^[[:space:]]*runs-on:[[:space:]]*//' | sed -E 's/[[:space:]]*#.*$//' \
+    | sed -E 's/[[:space:]]+$//' \
+    | grep -v '^$' | sort | uniq -c | sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]/\1 /' || true)
+
+  # Bare 'runs-on:' with the value on following lines can't be classified
+  # by a line grep — surface them so they're reviewed, not missed.
+  local multiline
+  multiline="$(grep -rcE '^[[:space:]]*runs-on:[[:space:]]*$' "${wf_dir}"/*.y*ml 2>/dev/null \
+    | awk -F: '$2 > 0 {s+=$2} END {print s+0}' || true)"
+  [[ "${multiline}" -gt 0 ]] \
+    && rm::warn "${multiline} multi-line runs-on block(s) not classified — review manually"
+
+  echo >&2
+  rm::log "Summary: ${ok} jobs reach a scale-set · ${labels} use label arrays (unreachable) · ${unknown} name unknown · ${hosted} GitHub-hosted · ${dynamic} dynamic"
+  if [[ $((labels + unknown)) -gt 0 && -n "${scale_sets}" ]]; then
+    rm::log "Suggestion: point jobs at a provisioned scale-set by name, e.g.:"
+    local s
+    while IFS= read -r s; do
+      printf '    runs-on: %s\n' "${s}" >&2
+    done <<<"${scale_sets}"
+  fi
+}
