@@ -75,6 +75,46 @@ The key points, because two of them are easy to get wrong:
    `--vpn-auth` drives the `tailscale` CLI in the same OS it runs in.
    The Mac's own Tailscale app is only useful for `node:auto`'s
    read-only "is there already a server?" discovery check.
+3. **kubectl on the Mac host uses lima's localhost forward.** The host
+   isn't on the tailnet (see point 2), so it can't reach the node's
+   `100.x` address — but lima auto-forwards the VM's listening ports,
+   so `https://127.0.0.1:6443` works. Point your kubeconfig there on
+   the host that runs the VM; other machines use the Tailscale IP.
+4. **Bind lima's forwards to localhost.** By default colima's forwarder
+   binds guest ports on *all* host interfaces, which exposes the k3s
+   API's TLS endpoint to your LAN (requests still get 401 without
+   credentials, but there's no reason to offer the port). Fix once per
+   host, then `colima stop && colima start`:
+
+   ```yaml
+   # ~/.colima/_lima/_config/override.yaml
+   portForwards:
+   - guestPortRange: [1, 65535]
+     hostIP: "127.0.0.1"
+   ```
+
+   Tailscale-mesh traffic is unaffected — it tunnels directly into the
+   VM and never touches lima's forwarder.
+
+## Pod routes need ACL auto-approval
+
+k3s advertises each node's pod CIDR (a `10.42.x.0/24` slice by default)
+as a Tailscale subnet route. Routes are inert until approved, and
+unapproved routes fail *quietly*: nodes join fine, pods schedule fine,
+but cross-node pod traffic — e.g. DNS lookups from an agent node's pods
+to CoreDNS on the server — blackholes. `net:init` prints the ACL block;
+it looks like this:
+
+```jsonc
+"autoApprovers": {
+  "routes": {
+    "10.42.0.0/16": ["tag:runner-mesh-node"],
+  },
+},
+```
+
+If you adopted the mesh before this block existed, add it and approve
+any already-advertised routes under **Machines → node → Route settings**.
 
 ## Why Tailscale here
 
