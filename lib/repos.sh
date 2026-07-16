@@ -205,15 +205,32 @@ rm::repos::remove() {
 
   helm uninstall "${release}" --namespace "${namespace}" \
     || rm::die "helm uninstall failed"
-  kubectl -n "${namespace}" delete secret "${secret_name}" --ignore-not-found=true >/dev/null
+
+  # The controller's finalizer deregisters the scale-set from GitHub and
+  # needs the credentials Secret to do it — deleting the Secret first
+  # leaves the AutoscalingRunnerSet stuck terminating forever ("failed to
+  # get kubernetes secret", found the hard way against a live cluster).
+  # helm uninstall returns before finalization, so wait for the CR to
+  # actually be gone before touching the Secret.
+  rm::info "waiting for the controller to deregister the scale-set from GitHub..."
+  kubectl -n "${namespace}" wait --for=delete \
+    "autoscalingrunnerset/${release}" --timeout=180s >/dev/null 2>&1 \
+    || rm::warn "scale-set still terminating after 180s — leaving Secret '${secret_name}' in place for its finalizer; re-run repos:remove once it settles"
+
+  if ! kubectl -n "${namespace}" get "autoscalingrunnerset/${release}" >/dev/null 2>&1; then
+    kubectl -n "${namespace}" delete secret "${secret_name}" --ignore-not-found=true >/dev/null
+  fi
   rm -f "$(rm::repos::_values_file "${repo}")"
 
   # Only remove the namespace itself once nothing else lives in it — in
   # shared mode that's everything else provisioned, so this simply won't
-  # fire until the last repo is removed.
+  # fire until the last repo is removed. Skipped while this repo's CR is
+  # still terminating: kubectl delete namespace blocks on finalization,
+  # and the stuck-finalizer case above would hang it indefinitely.
   local remaining
   remaining="$(helm list --namespace "${namespace}" -q 2>/dev/null || true)"
-  if [[ -z "${remaining}" ]]; then
+  if [[ -z "${remaining}" ]] \
+    && [[ -z "$(kubectl -n "${namespace}" get autoscalingrunnerset -o name 2>/dev/null)" ]]; then
     kubectl delete namespace "${namespace}" --ignore-not-found=true >/dev/null
   fi
 
