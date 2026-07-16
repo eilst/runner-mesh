@@ -95,6 +95,16 @@ The key points, because two of them are easy to get wrong:
 
    Tailscale-mesh traffic is unaffected — it tunnels directly into the
    VM and never touches lima's forwarder.
+5. **k3s must wait for colima's data disk** (the printed plans include
+   this as step 0c). colima mounts `/var/lib/rancher` from a separate
+   disk *after* systemd starts k3s, so on the first VM reboot k3s races
+   the mount, bootstraps a second cluster CA into the hidden rootfs, and
+   the API dies with `x509: certificate signed by unknown authority` —
+   served CA and on-disk CA disagree. The fix is a systemd drop-in that
+   blocks startup until the mount exists; if you hit the x509 state
+   anyway, recovery is stopping k3s, deleting
+   `/var/lib/rancher/k3s/{server/db,server/tls,server/cred,agent}`, and
+   re-running `fleet:apply` (all cluster content is reproducible).
 
 ## Pod routes need ACL auto-approval
 

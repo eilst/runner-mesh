@@ -34,7 +34,10 @@ rm::node::_is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 # is prepended to the printed plan so a Mac user gets a runnable
 # procedure instead of just "k3s is Linux-only".
 rm::node::_macos_prelude() {
-  cat <<'EOF'
+  # $1: the k3s systemd unit the plan installs (k3s or k3s-agent) — needed
+  # by the mount-race drop-in in step 0c.
+  local unit="${1:-k3s}"
+  cat <<EOF
 # ─── macOS host detected ────────────────────────────────────────────────
 # k3s only runs on Linux, so on a Mac the cluster node lives inside a
 # colima VM, and Tailscale runs INSIDE that VM (not the macOS Tailscale
@@ -48,6 +51,16 @@ rm::node::_macos_prelude() {
 #
 # 0b) Enter the VM; run everything below inside it:
 #   colima ssh
+#
+# 0c) colima-specific, run AFTER the k3s install step below: make k3s wait
+#     for colima's data disk. colima mounts /var/lib/rancher from a
+#     separate disk *after* systemd starts ${unit} — without this drop-in,
+#     the first VM reboot bootstraps a second cluster CA into the hidden
+#     rootfs and the API goes self-inconsistent (x509: unknown authority):
+#   sudo mkdir -p /etc/systemd/system/${unit}.service.d
+#   printf '[Service]\\nExecStartPre=/bin/sh -c "until findmnt -n /var/lib/rancher >/dev/null; do sleep 1; done"\\nTimeoutStartSec=300\\n' \\
+#     | sudo tee /etc/systemd/system/${unit}.service.d/10-wait-datadisk.conf
+#   sudo systemctl daemon-reload && sudo systemctl restart ${unit}
 # ────────────────────────────────────────────────────────────────────────
 
 EOF
@@ -55,9 +68,10 @@ EOF
 
 rm::node::_emit_plan() {
   # Prepends the macOS/colima prelude when relevant, then the plan itself.
-  local plan="$1"
+  # $2: the k3s systemd unit the plan installs (k3s or k3s-agent).
+  local plan="$1" unit="${2:-k3s}"
   if rm::node::_is_macos; then
-    printf '%s\n\n%s\n' "$(rm::node::_macos_prelude)" "${plan}"
+    printf '%s\n\n%s\n' "$(rm::node::_macos_prelude "${unit}")" "${plan}"
   else
     printf '%s\n' "${plan}"
   fi
@@ -117,9 +131,9 @@ rm::node::init() {
 command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} | sudo sh
 
 # 2) Install k3s as a server, joined to your tailnet as '${hostname}':
-#    (--vpn-auth stays unquoted on purpose: the value has no spaces, and
-#    embedded quotes end up escaped into the systemd unit, breaking k3s's
-#    vpn-auth parser with 'unknown parameter: name\\')
+#    NOTE: --vpn-auth stays unquoted on purpose. The value has no spaces,
+#    and embedded quotes end up escaped into the systemd unit, which the
+#    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
   INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth}" \\
   sudo sh -
@@ -138,7 +152,7 @@ runner-mesh node:join --server ${hostname} --token ${token} --authkey ${authkey}
 EOF
   )"
 
-  rm::node::_emit_plan "${plan}"
+  rm::node::_emit_plan "${plan}" k3s
   rm::warn "the token above is a cluster-join secret — treat it like a password, don't commit it"
   rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
@@ -170,9 +184,9 @@ rm::node::join() {
 command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} | sudo sh
 
 # 2) Install k3s as an agent, joined to your tailnet as '${hostname}':
-#    (--vpn-auth stays unquoted on purpose: the value has no spaces, and
-#    embedded quotes end up escaped into the systemd unit, breaking k3s's
-#    vpn-auth parser with 'unknown parameter: name\\')
+#    NOTE: --vpn-auth stays unquoted on purpose. The value has no spaces,
+#    and embedded quotes end up escaped into the systemd unit, which the
+#    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
   INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth}" \\
   sudo sh -
@@ -192,7 +206,7 @@ kubectl get nodes
 EOF
   )"
 
-  rm::node::_emit_plan "${plan}"
+  rm::node::_emit_plan "${plan}" k3s-agent
   rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
 
