@@ -42,6 +42,24 @@ runner-mesh repos:list      # see what the App can now see
 runner-mesh repos:add       # interactively pick which of those get runners
 ```
 
+## Why this works without a GitHub org
+
+GitHub's own **org-level runners** (register once, share across every repo
+in the org, controlled by runner groups) are the "correct" GitHub-native
+way to share runners across repos — but they only exist for
+organizations. There is no equivalent for a personal account; runners
+there are strictly repo-scoped, one registration per repo, full stop.
+
+GitHub Apps don't have that restriction. You can create an App under your
+**personal** account and install it on any repos your personal account
+owns — the installation step (`https://github.com/apps/<slug>/installations/new`)
+works identically whether the App and repos belong to an org or to you
+personally. That's the actual reason `runner-mesh` is built on the App
+model instead of org runner groups: it's the one mechanism that gives you
+"one credential, many repos" sharing *without* requiring you to have (or
+create) an org at all. If your repos are personal, nothing in this setup
+changes — same `app:init`, same installation screen, same `repos:add`.
+
 ## Why not a Personal Access Token?
 
 A PAT is simpler to wire up, but ties every scale-set's access to your
