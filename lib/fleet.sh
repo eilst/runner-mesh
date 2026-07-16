@@ -37,6 +37,7 @@ rm::fleet::apply() {
     || rm::die "no repos.txt in ${config_dir} — is this a fleet config repo? (see 'runner-mesh fleet:init')"
 
   rm::preflight::run || rm::die "fix the failed checks above, then re-run"
+  rm::fleet::_unseal "${config_dir}"
   rm::github_app::require_config
 
   # Committed per-repo overrides are the fleet's source of truth — sync
@@ -109,6 +110,73 @@ rm::fleet::_prune() {
     rm::log "prune: ${url} is provisioned but not in repos.txt"
     rm::repos::remove "${url}"
   done <<<"${releases}"
+}
+
+# --- Sealed secrets (SOPS + age) ------------------------------------------
+# The fleet repo may carry the GitHub App credentials ENCRYPTED
+# (secrets/github-app.enc.json, sealed with SOPS against a fleet age key).
+# The age key is secret zero: one line, copied to each machine's
+# ~/.config/runner-mesh/age.key over a secure channel, never committed.
+# Chosen over Bitnami sealed-secrets (decryptable only inside one specific
+# cluster — useless for pre-cluster machine bootstrap, and orphaned if the
+# homelab cluster is ever rebuilt) and over GitHub repo secrets (write-only;
+# unreadable outside Actions runs).
+
+RM_AGE_KEY_FILE="${RM_AGE_KEY_FILE:-${RM_CONFIG_DIR}/age.key}"
+
+# fleet:seal [dir] — encrypt the local GitHub App credentials into the
+# fleet repo. Generates the fleet age key on first use.
+rm::fleet::seal() {
+  local dir="${1:-.}"
+  command -v sops >/dev/null 2>&1 || rm::die "sops is required (brew install sops)"
+  command -v age-keygen >/dev/null 2>&1 || rm::die "age is required (brew install age)"
+  rm::github_app::require_config
+  [[ -f "${dir}/repos.txt" ]] || rm::die "${dir} doesn't look like a fleet config repo"
+
+  if [[ ! -f "${RM_AGE_KEY_FILE}" ]]; then
+    mkdir -p "$(dirname "${RM_AGE_KEY_FILE}")"
+    age-keygen -o "${RM_AGE_KEY_FILE}" 2>/dev/null
+    chmod 600 "${RM_AGE_KEY_FILE}"
+    rm::ok "generated fleet age key at ${RM_AGE_KEY_FILE}"
+  fi
+  local pubkey
+  pubkey="$(age-keygen -y "${RM_AGE_KEY_FILE}")"
+
+  mkdir -p "${dir}/secrets"
+  sops --encrypt --age "${pubkey}" --output "${dir}/secrets/github-app.enc.json" \
+    "${RM_APP_CONFIG}" \
+    || rm::die "sops encryption failed"
+
+  rm::ok "sealed App credentials -> ${dir}/secrets/github-app.enc.json (commit this)"
+  rm::log "to let another machine unseal: copy ${RM_AGE_KEY_FILE} to it over a"
+  rm::info "secure channel (one line — this is the fleet's secret zero; never commit it)"
+}
+
+# Unseal on apply: if the repo carries sealed credentials and this machine
+# has none locally, decrypt them into place. A locally-present file is left
+# alone (app:init on this machine is newer truth than the repo until the
+# operator re-seals).
+rm::fleet::_unseal() {
+  local config_dir="$1"
+  local sealed="${config_dir}/secrets/github-app.enc.json"
+  [[ -f "${sealed}" ]] || return 0
+  [[ -f "${RM_APP_CONFIG}" ]] && return 0
+  if ! command -v sops >/dev/null 2>&1; then
+    rm::warn "sealed credentials present but sops isn't installed (brew install sops)"
+    return 0
+  fi
+  if [[ ! -f "${RM_AGE_KEY_FILE}" ]]; then
+    rm::warn "sealed credentials present but no age key at ${RM_AGE_KEY_FILE} — copy the fleet key there to unseal"
+    return 0
+  fi
+  mkdir -p "$(dirname "${RM_APP_CONFIG}")"
+  if SOPS_AGE_KEY_FILE="${RM_AGE_KEY_FILE}" sops --decrypt "${sealed}" > "${RM_APP_CONFIG}"; then
+    chmod 600 "${RM_APP_CONFIG}"
+    rm::ok "unsealed App credentials from the fleet repo"
+  else
+    rm -f "${RM_APP_CONFIG}"
+    rm::die "failed to decrypt ${sealed} — wrong age key?"
+  fi
 }
 
 # fleet:init [dir] — scaffold a new fleet config repo: data files plus the

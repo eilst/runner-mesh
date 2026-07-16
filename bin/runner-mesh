@@ -64,6 +64,9 @@ COMMANDS
                         engine pin, values/, delegating shim)
   fleet:apply [dir]      Converge the cluster on a config repo's declared
                         state; --prune also removes unlisted scale-sets
+  fleet:seal [dir]       Encrypt the GitHub App credentials into the fleet
+                        repo (SOPS+age); apply auto-unseals on machines
+                        holding the fleet age key
   version               Print the runner-mesh version
 
 node:* commands never touch root/systemd themselves — they print the
@@ -116,6 +119,7 @@ main() {
     status)             rm::status::run "$@" ;;
     fleet:init)          rm::fleet::init "$@" ;;
     fleet:apply)         rm::fleet::apply "$@" ;;
+    fleet:seal)          rm::fleet::seal "$@" ;;
     version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;
     -h|--help|help|"")  rm::usage ;;
     *)
