@@ -21,7 +21,7 @@ export RM_ROOT
 
 # Each lib is sourced if present, so the CLI stays runnable while a command's
 # implementation lands in its own commit.
-for _rm_lib in log preflight cluster github_app repos status; do
+for _rm_lib in log preflight cluster github_app repos status node; do
   if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
     # shellcheck source=/dev/null
     source "${RM_ROOT}/lib/${_rm_lib}.sh"
@@ -38,6 +38,14 @@ USAGE
 
 COMMANDS
   doctor              Verify local toolchain and cluster connectivity
+
+  node:init             Print the plan to bootstrap this machine as the
+                        first k3s cluster node (Tailscale-meshed)
+  node:join             Print the plan to join an existing cluster
+  node:auto              Read-only discovery + print init or join plan,
+                        whichever this machine needs (same 2 secrets
+                        on every machine)
+
   cluster:install      Install/upgrade the Actions Runner Controller
   cluster:uninstall    Remove the controller (repos must be removed first)
   app:init              Create a GitHub App via the manifest flow and store its
@@ -47,6 +55,12 @@ COMMANDS
   repos:remove <repo>    Tear down the runner scale-set for owner/repo
   status                Show controller + per-repo runner pool health
   version               Print the runner-mesh version
+
+node:* commands never touch root/systemd themselves — they print the
+exact install commands (or do read-only Tailscale discovery) for you to
+review and run. cluster:*/repos:* commands do act directly, but only via
+your own existing kubectl credentials against a cluster you already
+control — no new installers, no new privilege.
 
 GLOBAL FLAGS
   --yes, -y           Assume "yes" to confirmation prompts (non-interactive)
@@ -73,6 +87,9 @@ main() {
 
   case "${cmd}" in
     doctor)            rm::preflight::run ;;
+    node:init)          rm::node::init "$@" ;;
+    node:join)          rm::node::join "$@" ;;
+    node:auto)           rm::node::auto "$@" ;;
     cluster:install)   rm::cluster::install "$@" ;;
     cluster:uninstall) rm::cluster::uninstall "$@" ;;
     app:init)           rm::github_app::init "$@" ;;
