@@ -68,8 +68,8 @@ rm::net::_token() {
 # rm::net::key [--expiry SECONDS] [--reusable] — mint a tagged,
 # pre-authorized auth key and print it (stdout only, script-friendly).
 # Defaults: single-use, 1 hour — a key should live about as long as the
-# join it exists for. (Args arrive via the CLI dispatcher, which
-# shellcheck can't see across files.)
+# join it exists for. (Args arrive via the CLI dispatcher, invisible to
+# the linter across files.)
 # shellcheck disable=SC2120
 rm::net::key() {
   local expiry=3600 reusable=false
