@@ -143,11 +143,16 @@ rm::fleet::seal() {
   pubkey="$(age-keygen -y "${RM_AGE_KEY_FILE}")"
 
   mkdir -p "${dir}/secrets"
-  sops --encrypt --age "${pubkey}" --output "${dir}/secrets/github-app.enc.json" \
-    "${RM_APP_CONFIG}" \
-    || rm::die "sops encryption failed"
-
-  rm::ok "sealed App credentials -> ${dir}/secrets/github-app.enc.json (commit this)"
+  # Seals every operator credential present: the GitHub App file always
+  # (require_config above), the Tailscale OAuth client when configured.
+  local src base
+  for src in "${RM_APP_CONFIG}" "${RM_TS_CONFIG:-}"; do
+    [[ -n "${src}" && -f "${src}" ]] || continue
+    base="$(basename "${src}" .json)"
+    sops --encrypt --age "${pubkey}" --output "${dir}/secrets/${base}.enc.json" "${src}" \
+      || rm::die "sops encryption failed for ${base}"
+    rm::ok "sealed ${base} -> ${dir}/secrets/${base}.enc.json (commit this)"
+  done
   rm::log "to let another machine unseal: copy ${RM_AGE_KEY_FILE} to it over a"
   rm::info "secure channel (one line — this is the fleet's secret zero; never commit it)"
 }
@@ -157,26 +162,31 @@ rm::fleet::seal() {
 # alone (app:init on this machine is newer truth than the repo until the
 # operator re-seals).
 rm::fleet::_unseal() {
-  local config_dir="$1"
-  local sealed="${config_dir}/secrets/github-app.enc.json"
-  [[ -f "${sealed}" ]] || return 0
-  [[ -f "${RM_APP_CONFIG}" ]] && return 0
-  if ! command -v sops >/dev/null 2>&1; then
-    rm::warn "sealed credentials present but sops isn't installed (brew install sops)"
-    return 0
-  fi
-  if [[ ! -f "${RM_AGE_KEY_FILE}" ]]; then
-    rm::warn "sealed credentials present but no age key at ${RM_AGE_KEY_FILE} — copy the fleet key there to unseal"
-    return 0
-  fi
-  mkdir -p "$(dirname "${RM_APP_CONFIG}")"
-  if SOPS_AGE_KEY_FILE="${RM_AGE_KEY_FILE}" sops --decrypt "${sealed}" > "${RM_APP_CONFIG}"; then
-    chmod 600 "${RM_APP_CONFIG}"
-    rm::ok "unsealed App credentials from the fleet repo"
-  else
-    rm -f "${RM_APP_CONFIG}"
-    rm::die "failed to decrypt ${sealed} — wrong age key?"
-  fi
+  local config_dir="$1" sealed base target found=0
+  for sealed in "${config_dir}"/secrets/*.enc.json; do
+    [[ -f "${sealed}" ]] || continue
+    found=1
+    base="$(basename "${sealed}" .enc.json)"
+    target="${RM_CONFIG_DIR}/${base}.json"
+    [[ -f "${target}" ]] && continue
+    if ! command -v sops >/dev/null 2>&1; then
+      rm::warn "sealed credentials present but sops isn't installed (brew install sops)"
+      return 0
+    fi
+    if [[ ! -f "${RM_AGE_KEY_FILE}" ]]; then
+      rm::warn "sealed credentials present but no age key at ${RM_AGE_KEY_FILE} — copy the fleet key there to unseal"
+      return 0
+    fi
+    mkdir -p "${RM_CONFIG_DIR}"
+    if SOPS_AGE_KEY_FILE="${RM_AGE_KEY_FILE}" sops --decrypt "${sealed}" > "${target}"; then
+      chmod 600 "${target}"
+      rm::ok "unsealed ${base} from the fleet repo"
+    else
+      rm -f "${target}"
+      rm::die "failed to decrypt ${sealed} — wrong age key?"
+    fi
+  done
+  [[ "${found}" == "1" ]] && return 0 || return 0
 }
 
 # fleet:init [dir] — scaffold a new fleet config repo: data files plus the

@@ -122,6 +122,38 @@ Every machine that clones the fleet repo and runs `make apply` converges
 on the same state — pools are cluster-wide, so a new machine adds
 capacity, not configuration.
 
+### Secrets: sealed in the repo, one key outside it
+
+The fleet repo can carry every operator credential **encrypted** (SOPS +
+age — the gitops-standard pattern): `fleet:seal` encrypts your GitHub App
+credentials and Tailscale OAuth client into `secrets/*.enc.json`, and
+`make apply` unseals them automatically on any machine holding the fleet
+**age key** — one line at `~/.config/runner-mesh/age.key`, carried
+hand-to-hand, never committed. That one line is the fleet's *secret
+zero*: every scheme needs at least one hand-carried credential; this
+design makes it exactly one, and makes it tiny.
+
+### Adding a machine
+
+Two browser sessions exist in the life of a fleet, both one-time and
+guided: `app:init` (GitHub App) and `net:init` (Tailscale account + OAuth
+client — after it, auth keys mint from the terminal and `node:*` needs no
+`--authkey` flag). After those, machines are added with no consoles:
+
+**As a worker node** (contributes capacity; needs no repo, no age key):
+```bash
+colima start --cpu 4 --memory 8              # plain — no --kubernetes
+runner-mesh node:join --server <ts-ip> --token <cluster-secret>
+#   → auth key mints itself; paste the printed plan into `colima ssh`
+kubectl label node <name> runner-mesh.dev/size=large   # from any operator
+```
+
+**As an operator** (manages the fleet): copy the age key line, then
+```bash
+git clone <your-fleet-repo> && cd <fleet> && make apply
+#   → credentials unseal, cluster converges; k9s/kubectl via copied kubeconfig
+```
+
 ## Quickstart (single machine, ~10 minutes)
 
 ```bash
@@ -154,6 +186,9 @@ them and tells you exactly what's missing.
 | `doctor` | Verify local toolchain and cluster connectivity |
 | `fleet:init [dir]` | Scaffold a data-only fleet config repo (repos, pins, values, shim, Makefile) |
 | `fleet:apply [dir] [--prune]` | Converge the cluster on the declared state; `--prune` removes undeclared pools |
+| `fleet:seal [dir]` | Encrypt operator credentials into the fleet repo (SOPS+age); `apply` auto-unseals |
+| `net:init` | One guided Tailscale setup (account, tag ACL, OAuth client) |
+| `net:key` | Mint a tagged, single-use Tailscale auth key from the terminal |
 | `cluster:install` / `cluster:uninstall` | ARC controller lifecycle (cluster-wide, once) |
 | `app:init` | Create a GitHub App via the manifest flow, store credentials locally |
 | `repos:list` | Repos the App can see, and their provisioned state |

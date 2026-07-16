@@ -104,7 +104,7 @@ rm::node::init() {
       *) rm::die "unknown flag: $1" ;;
     esac
   done
-  [[ -n "${authkey}" ]] || rm::die "usage: runner-mesh node:init --authkey <tailscale-auth-key> [--hostname NAME] [--token TOKEN] [--write-script PATH]"
+  authkey="$(rm::net::resolve_authkey "${authkey}")"
   [[ -n "${token}" ]] || token="$(openssl rand -hex 32)"
 
   local vpn_auth="name=tailscale,joinKey=${authkey}"
@@ -147,8 +147,9 @@ rm::node::join() {
       *) rm::die "unknown flag: $1" ;;
     esac
   done
-  [[ -n "${server}" && -n "${token}" && -n "${authkey}" ]] \
-    || rm::die "usage: runner-mesh node:join --server <hostname-or-ip> --token <token> --authkey <tailscale-auth-key> [--hostname NAME] [--write-script PATH]"
+  [[ -n "${server}" && -n "${token}" ]] \
+    || rm::die "usage: runner-mesh node:join --server <hostname-or-ip> --token <token> [--authkey KEY] [--hostname NAME] [--write-script PATH]"
+  authkey="$(rm::net::resolve_authkey "${authkey}")"
   [[ -n "${hostname}" ]] || hostname="runner-mesh-$(hostname -s 2>/dev/null || echo agent)"
 
   local vpn_auth="name=tailscale,joinKey=${authkey}"
@@ -194,8 +195,9 @@ rm::node::auto() {
       *) rm::die "unknown flag: $1" ;;
     esac
   done
-  [[ -n "${authkey}" && -n "${secret}" ]] \
-    || rm::die "usage: runner-mesh node:auto --authkey <tailscale-auth-key> --secret <shared-cluster-secret> [--hostname NAME]"
+  [[ -n "${secret}" ]] \
+    || rm::die "usage: runner-mesh node:auto --secret <shared-cluster-secret> [--authkey KEY] [--hostname NAME]"
+  authkey="$(rm::net::resolve_authkey "${authkey}")"
 
   if ! command -v tailscale >/dev/null 2>&1; then
     rm::warn "Tailscale isn't installed on this machine yet, so I can't check whether a \
