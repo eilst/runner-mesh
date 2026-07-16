@@ -11,12 +11,17 @@
 - Bring-your-own-cluster: colima (`--kubernetes`), k3d, bare-metal k3s, or
   any other conformant cluster all work identically, since `runner-mesh`
   only ever talks to whatever `kubectl` context is current
+- `node:init` / `node:join` / `node:auto` — plan (validate inputs,
+  generate the join token, do read-only Tailscale discovery, print the
+  exact k3s + Tailscale bootstrap commands) a Tailscale-meshed multi-node
+  cluster, including machines that leave the LAN. **Intentionally
+  print-only, not auto-executing** — see `docs/tailscale-mesh.md` for why;
+  this is a permanent design choice, not a gap to close later. Not yet
+  exercised against a real k3s install (no Linux host was available while
+  building it) — validate on real hardware before relying on it.
 
 ## Phase 2 — designed, not yet automated
 
-- `cluster:join` — script the k3s `--vpn-auth` Tailscale bootstrap
-  described in `docs/tailscale-mesh.md` instead of leaving it as a manual
-  walkthrough
 - Default `NetworkPolicy` objects generated per repo (default-deny except
   to the internet and the controller) — needed in **both** namespace
   modes: `shared` colocates repos in one namespace with no policy today,
@@ -39,11 +44,13 @@
 
 ## Explicitly out of scope
 
-- **Cluster provisioning itself** (turning bare machines into a joined
-  k3s cluster) — `runner-mesh` is bring-your-own-cluster by design; this
-  keeps the tool useful to anyone with a working `kubectl` context
-  regardless of how they got one, and avoids duplicating tools like k3sup,
-  Ansible, or Terraform that already do this well.
+- **`node:*` auto-executing installers** — `curl | sudo sh` run
+  autonomously on your behalf, even for a well-known installer like
+  get.k3s.io or tailscale.com's, is a different trust category than
+  everything else this tool does (which only ever acts via your existing
+  kubectl credentials against a cluster you already control). `node:*`
+  will always print/plan, never execute, on principle — not a gap, a
+  boundary.
 - **A custom repo-access picker replacing GitHub's own App-installation
   UI** — GitHub's native installation screen is the actual authorization
   boundary and already has a correct, audited UX for it; `runner-mesh`

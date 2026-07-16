@@ -42,10 +42,14 @@ and idempotent.
   real pod `resources.requests`/`limits` as the physical ceiling — both
   configurable, neither alone sufficient. See
   [`docs/architecture.md`](docs/architecture.md).
-- **Bring-your-own-cluster**: works against any `kubectl` context — colima
-  (`--kubernetes`), k3d, bare-metal k3s, anything conformant. Cluster
-  provisioning is deliberately out of scope; see
-  [`docs/roadmap.md`](docs/roadmap.md) for why.
+- **Bring-your-own-cluster, or plan a new one**: works against any
+  `kubectl` context — colima (`--kubernetes`), k3d, bare-metal k3s,
+  anything conformant. For a real multi-machine cluster (including a
+  laptop that leaves your LAN), `node:init`/`node:join`/`node:auto` plan a
+  Tailscale-meshed k3s bootstrap — same two secrets on every machine for
+  `node:auto`. These print the exact commands rather than running
+  `curl | sudo sh` on your behalf on principle, not as a missing feature —
+  see [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md).
 
 ## Quickstart
 
@@ -81,6 +85,9 @@ what's missing.
 | Command | Does |
 |---|---|
 | `doctor` | Verify local toolchain and cluster connectivity |
+| `node:init` | Print the plan to bootstrap the first Tailscale-meshed k3s node |
+| `node:join` | Print the plan to join an existing cluster |
+| `node:auto` | Read-only discovery + print init or join plan automatically |
 | `cluster:install` | Install/upgrade the ARC controller (cluster-wide, once) |
 | `cluster:uninstall` | Remove the controller |
 | `app:init` | Create a GitHub App via the manifest flow, store credentials |
@@ -109,9 +116,10 @@ Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
 
 Pre-1.0, actively developed. The core loop (controller install, GitHub App
 setup, per-repo provisioning, status) is implemented and CI-tested against
-a real k3d cluster on every push. Multi-node Tailscale cluster join is
-currently a documented manual process, not yet a scripted command — see
-the roadmap.
+a real k3d cluster on every push. `node:*` cluster bootstrap plans a real
+Tailscale-meshed k3s cluster but hasn't been exercised against a real
+Linux host by the person who wrote it — validate on your own hardware
+before depending on it, and see the roadmap for what else is still ahead.
 
 ## Contributing
 
