@@ -27,6 +27,9 @@ prefer several focused commits over one large one.
 
 ## Pull requests
 
+All changes land via pull request — `main` is protected, and direct
+pushes are rejected even for maintainers.
+
 - One logical change per PR.
 - Include a one-line rationale in the PR description (the "why", not a
   restatement of the diff).
