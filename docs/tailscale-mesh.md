@@ -140,6 +140,27 @@ Then use the `nodeSelector` block already present (commented out) in
 schedule accordingly — heavy job runners on `large`, controller/listener
 pods on `small`.
 
+## What a Tailscale outage does (and doesn't do)
+
+Tailscale's control plane is a matchmaker, not a middleman: it introduces
+nodes and distributes keys, but established WireGuard tunnels carry
+traffic peer-to-peer without it. During a control-plane outage:
+
+- **Keeps working**: the cluster itself (k3s API, pod network) between
+  already-joined nodes; CI job traffic (plain internet, not Tailscale);
+  same-LAN nodes in particular, whose tunnels are direct local paths.
+- **Frozen until recovery**: joining new nodes, minting auth keys
+  (`net:key`), ACL/admin changes, and endpoint updates for a node that
+  changes networks mid-outage (a roaming laptop may lose tunnels until
+  the control plane returns).
+- **The sneaky one**: node keys expire (180-day default), and a node
+  whose key lapses during an outage drops off and cannot renew.
+
+**Recommended**: after each cluster node joins, disable key expiry for it
+in the admin console (Machines → ⋯ → Disable key expiry) — standard
+practice for servers vs. laptops, and it removes the only mechanism by
+which a control-plane outage can eject an existing node.
+
 ## Security note
 
 Devices joining your tailnet inherit whatever your ACLs allow. Tag your

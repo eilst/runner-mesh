@@ -171,6 +171,10 @@ sudo systemctl status k3s-agent --no-pager
 
 # 4) From the server (or a kubeconfig pointed at it), confirm the node joined:
 kubectl get nodes
+
+# 5) In the Tailscale admin console (Machines -> this node -> Disable key
+#    expiry): cluster nodes are servers, not laptops — expiring keys are
+#    the one way a Tailscale control-plane outage can eject a node.
 EOF
   )"
 
