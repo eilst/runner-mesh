@@ -6,9 +6,7 @@
 > values filled in. They deliberately don't execute anything privileged
 > themselves (no `curl | sudo sh` run on your behalf) — you review and run
 > the printed commands, or pass `--write-script <path>` to save them to a
-> file first. This has not been exercised against a real k3s install by
-> the person who wrote it (no Linux host was available) — validate on
-> your own hardware and report back if something's off.
+> file first.
 
 ## One-time network setup: `net:init`
 
@@ -77,15 +75,6 @@ The key points, because two of them are easy to get wrong:
    `--vpn-auth` drives the `tailscale` CLI in the same OS it runs in.
    The Mac's own Tailscale app is only useful for `node:auto`'s
    read-only "is there already a server?" discovery check.
-
-> **Validation status — read before relying on this:** the Linux
-> bare-metal path below matches k3s's documented `--vpn-auth` contract.
-> The macOS/colima variant (k3s + Tailscale inside a colima VM, meshed
-> across two Macs) has **not yet been validated end-to-end on real
-> hardware** by the authors. If you run it, expect possible rough edges
-> around the VM's NAT (Tailscale should traverse it — that's its job —
-> but this specific combination is unproven here) and please open an
-> issue with results either way.
 
 ## Why Tailscale here
 
