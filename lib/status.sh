@@ -34,35 +34,48 @@ rm::status::_controller() {
 
 rm::status::_repos() {
   rm::log "Repo runner pools"
-  local namespaces
-  namespaces="$(kubectl get namespace -o name 2>/dev/null | sed -n 's#^namespace/\(arc-runners-.*\)#\1#p')"
+  local arc_ns="${RM_ARC_NAMESPACE:-arc-systems}"
 
-  if [[ -z "${namespaces}" ]]; then
+  # A scale-set's namespace can be the shared "arc-runners" (exact match,
+  # RM_NAMESPACE_MODE=shared) or "arc-runners-<slug>" (per-repo mode) — so
+  # this needs both an exact match and a prefix match, not just a prefix.
+  # Enumerate by Helm release rather than by namespace: in shared mode,
+  # multiple repos' releases live in the one "arc-runners" namespace, so
+  # a repo is a (namespace, release) pair, not just a namespace.
+  local releases
+  releases="$(helm list --all-namespaces -o json 2>/dev/null \
+    | jq -r '.[] | select(.namespace == "arc-runners" or (.namespace | startswith("arc-runners-"))) | "\(.namespace)\t\(.name)"')"
+
+  if [[ -z "${releases}" ]]; then
     rm::info "none provisioned yet — run 'runner-mesh repos:add'"
     return
   fi
 
-  local ns
-  while IFS= read -r ns; do
+  local ns release
+  while IFS=$'\t' read -r ns release; do
     [[ -z "${ns}" ]] && continue
-    # Unlike the controller's Deployment label (verified via 'helm
-    # template'), listener and runner pods are created dynamically by the
-    # controller at runtime, not from this chart's static templates —
-    # there's no offline way to verify these label selectors against chart
-    # source. Treated as best-effort observability: kubectl returns exit 0
-    # with empty output for a selector that matches nothing, so a wrong
-    # label degrades to "unknown"/0 here rather than failing the command.
+    # The listener pod always lives in the CONTROLLER's namespace
+    # (verified by running this for real against eilst/inventario) — not
+    # the repo's own namespace, regardless of RM_NAMESPACE_MODE. It's
+    # precisely selectable by the scale-set's namespace+name labels, also
+    # verified against a real listener pod's labels.
     local listener_status active_runners
-    listener_status="$(kubectl -n "${ns}" get pods \
-      -l 'app.kubernetes.io/component=runner-scale-set-listener' \
+    listener_status="$(kubectl -n "${arc_ns}" get pods \
+      -l "actions.github.com/scale-set-namespace=${ns},actions.github.com/scale-set-name=${release}" \
       -o jsonpath='{.items[0].status.phase}' 2>/dev/null)"
+    # Runner pods, unlike the listener, do live in the repo's own
+    # namespace (verified via the EphemeralRunnerSet's namespace) — but
+    # this specific label is still an unverified guess (no job has run
+    # during testing to confirm it), so it stays best-effort: kubectl
+    # exits 0 with empty output for a selector matching nothing, so a
+    # wrong label degrades to 0 here rather than failing the command.
     active_runners="$(kubectl -n "${ns}" get pods \
       -l 'app.kubernetes.io/component=runner' \
       --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 
     printf '  %-30s listener=%-10s active_runners=%s\n' \
-      "${ns#arc-runners-}" "${listener_status:-unknown}" "${active_runners:-0}"
-  done <<<"${namespaces}"
+      "${release}" "${listener_status:-unknown}" "${active_runners:-0}"
+  done <<<"${releases}"
 }
 
 rm::status::run() {
