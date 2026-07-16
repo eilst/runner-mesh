@@ -30,8 +30,10 @@ rm::cluster::install() {
 
   if [[ "${RM_DRY_RUN:-0}" != "1" ]]; then
     rm::ok "Controller installed. Verifying rollout..."
+    # Label verified via 'helm template' against the actual chart output —
+    # it's 'gha-rs-controller', not the full chart name.
     kubectl -n "${RM_ARC_NAMESPACE}" rollout status deployment \
-      -l app.kubernetes.io/name=gha-runner-scale-set-controller --timeout=120s \
+      -l app.kubernetes.io/name=gha-rs-controller --timeout=120s \
       || rm::warn "could not confirm controller rollout — check 'kubectl -n ${RM_ARC_NAMESPACE} get pods'"
   fi
 }
