@@ -21,7 +21,7 @@ export RM_ROOT
 
 # Each lib is sourced if present, so the CLI stays runnable while a command's
 # implementation lands in its own commit.
-for _rm_lib in log preflight cluster github_app repos status node; do
+for _rm_lib in log preflight cluster github_app repos status node fleet; do
   if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
     # shellcheck source=/dev/null
     source "${RM_ROOT}/lib/${_rm_lib}.sh"
@@ -54,6 +54,11 @@ COMMANDS
   repos:add <repo>       Provision a runner scale-set for owner/repo
   repos:remove <repo>    Tear down the runner scale-set for owner/repo
   status                Show controller + per-repo runner pool health
+
+  fleet:init [dir]       Scaffold a data-only fleet config repo (repos.txt,
+                        engine pin, values/, delegating shim)
+  fleet:apply [dir]      Converge the cluster on a config repo's declared
+                        state; --prune also removes unlisted scale-sets
   version               Print the runner-mesh version
 
 node:* commands never touch root/systemd themselves — they print the
@@ -102,6 +107,8 @@ main() {
     repos:add)           rm::repos::add "$@" ;;
     repos:remove)        rm::repos::remove "$@" ;;
     status)             rm::status::run "$@" ;;
+    fleet:init)          rm::fleet::init "$@" ;;
+    fleet:apply)         rm::fleet::apply "$@" ;;
     version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;
     -h|--help|help|"")  rm::usage ;;
     *)
