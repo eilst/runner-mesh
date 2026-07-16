@@ -317,7 +317,11 @@ make k9s       # inspect the cluster (controller + listeners namespace)
 once on a fresh clone first. One-time per fleet:
 `./.runner-mesh/bin/runner-mesh app:init` on your first machine.
 Additional machines need `~/.config/runner-mesh/github-app.json` copied
-over a secure channel — deliberately never committed.
+over a secure channel — deliberately never committed (or sealed: see
+`make seal`).
+
+Full onboarding flows (founding, worker nodes, operators, secret matrix):
+<https://github.com/eilst/runner-mesh/blob/main/docs/onboarding.md>
 EOF
 
   rm::ok "fleet config scaffolded in ${dir} (engine pinned to ${engine_ref})"
