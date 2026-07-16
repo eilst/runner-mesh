@@ -106,7 +106,8 @@ listener pods (which are lightweight — see `docs/architecture.md` above).
 
 ## Multi-node clusters over Tailscale
 
-See `docs/tailscale-mesh.md` — this is documented as a roadmap item, not a
-scripted `runner-mesh` command yet. k3s has built-in Tailscale integration
-(`--vpn-auth`) that lets nodes join a cluster over a Tailscale mesh instead
-of raw LAN IPs, which is what makes a roaming laptop a viable cluster node.
+See `docs/tailscale-mesh.md` — `net:init` handles the one-time Tailscale
+setup, and `node:init`/`node:join`/`node:auto` plan each machine's join
+(minting auth keys automatically). k3s's built-in Tailscale integration
+(`--vpn-auth`) lets nodes address each other over the mesh instead of raw
+LAN IPs, which is what makes a roaming laptop a viable cluster node.
