@@ -22,6 +22,15 @@ resources:
 # nodeSelector:
 #   runner-mesh.dev/size: small
 
-metrics:
-  serviceMonitor:
-    enable: false
+# Metrics are off by default in the chart itself (the 'metrics' key must be
+# either fully absent or fully populated with real string addresses — the
+# chart's template does not tolerate a partially-set 'metrics' object, e.g.
+# a 'serviceMonitor' sub-key alone, which is not part of this chart's
+# schema at all despite looking like a reasonable Prometheus-Operator
+# convention). Verified against:
+#   helm show values oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+# Uncomment and fill in all three fields together to enable metrics:
+# metrics:
+#   controllerManagerAddr: ":8080"
+#   listenerAddr: ":8080"
+#   listenerEndpoint: "/metrics"
