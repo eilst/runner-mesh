@@ -136,23 +136,13 @@ design makes it exactly one, and makes it tiny.
 ### Adding a machine
 
 Two browser sessions exist in the life of a fleet, both one-time and
-guided: `app:init` (GitHub App) and `net:init` (Tailscale account + OAuth
-client — after it, auth keys mint from the terminal and `node:*` needs no
-`--authkey` flag). After those, machines are added with no consoles:
-
-**As a worker node** (contributes capacity; needs no repo, no age key):
-```bash
-colima start --cpu 4 --memory 8              # plain — no --kubernetes
-runner-mesh node:join --server <ts-ip> --token <cluster-secret>
-#   → auth key mints itself; paste the printed plan into `colima ssh`
-kubectl label node <name> runner-mesh.dev/size=large   # from any operator
-```
-
-**As an operator** (manages the fleet): copy the age key line, then
-```bash
-git clone <your-fleet-repo> && cd <fleet> && make apply
-#   → credentials unseal, cluster converges; k9s/kubectl via copied kubeconfig
-```
+guided: `app:init` (GitHub App) and `net:init` (Tailscale — after it,
+auth keys mint from the terminal and `node:*` needs no `--authkey` flag).
+After those, a **worker** joins with one command plus a pasted plan (no
+repo, no age key needed), and an **operator** is one age-key line +
+`git clone` + `make apply`. The full journey — founding the fleet,
+both machine roles, the complete secret matrix, and a flow diagram — is
+[`docs/onboarding.md`](docs/onboarding.md).
 
 ## Quickstart (single machine, ~10 minutes)
 
@@ -209,6 +199,8 @@ Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
   flow; why this works without a GitHub org
 - [`docs/quickstart-colima.md`](docs/quickstart-colima.md) — end-to-end
   local walkthrough
+- [`docs/onboarding.md`](docs/onboarding.md) — founding a fleet, adding
+  worker/operator machines, the secret matrix, with a flow diagram
 - [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md) — joining multiple
   machines (including macOS-via-colima and roaming laptops) into one cluster
 - [`docs/security.md`](docs/security.md) — threat model and hardening
