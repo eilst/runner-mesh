@@ -26,13 +26,40 @@ RM_NODE_HOSTNAME_DEFAULT="runner-mesh-server"
 RM_K3S_INSTALL_URL="https://get.k3s.io"
 RM_TAILSCALE_INSTALL_URL="https://tailscale.com/install.sh"
 
-rm::node::_warn_if_not_linux() {
-  local os
-  os="$(uname -s)"
-  if [[ "${os}" != "Linux" ]]; then
-    rm::warn "you're on ${os} — k3s only runs on Linux. The commands below are meant to run \
-inside a Linux VM (e.g. via 'colima ssh' on a VM you've provisioned k3s tooling into) or a real \
-Linux box on your network, not on this host directly. See docs/tailscale-mesh.md."
+rm::node::_is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
+
+# On macOS, k3s can't run on the host — it runs inside a colima-managed
+# Linux VM, and Tailscale must run inside that same VM (not the macOS
+# host's Tailscale app) so k3s's --vpn-auth can bind to it. This prelude
+# is prepended to the printed plan so a Mac user gets a runnable
+# procedure instead of just "k3s is Linux-only".
+rm::node::_macos_prelude() {
+  cat <<'EOF'
+# ─── macOS host detected ────────────────────────────────────────────────
+# k3s only runs on Linux, so on a Mac the cluster node lives inside a
+# colima VM, and Tailscale runs INSIDE that VM (not the macOS Tailscale
+# app — k3s's --vpn-auth needs the tailscale CLI in the same OS it runs
+# in). Steps 1-3 below therefore run inside 'colima ssh'.
+#
+# 0a) Create/ensure the VM (plain docker runtime — do NOT use colima's
+#     --kubernetes flag here; it installs its own k3s without --vpn-auth,
+#     which can't join or host a Tailscale-meshed cluster):
+#   colima start --cpu 2 --memory 4
+#
+# 0b) Enter the VM; run everything below inside it:
+#   colima ssh
+# ────────────────────────────────────────────────────────────────────────
+
+EOF
+}
+
+rm::node::_emit_plan() {
+  # Prepends the macOS/colima prelude when relevant, then the plan itself.
+  local plan="$1"
+  if rm::node::_is_macos; then
+    printf '%s\n\n%s\n' "$(rm::node::_macos_prelude)" "${plan}"
+  else
+    printf '%s\n' "${plan}"
   fi
 }
 
@@ -80,8 +107,6 @@ rm::node::init() {
   [[ -n "${authkey}" ]] || rm::die "usage: runner-mesh node:init --authkey <tailscale-auth-key> [--hostname NAME] [--token TOKEN] [--write-script PATH]"
   [[ -n "${token}" ]] || token="$(openssl rand -hex 32)"
 
-  rm::node::_warn_if_not_linux
-
   local vpn_auth="name=tailscale,joinKey=${authkey}"
   local plan
   plan="$(rm::node::_plan_block <<EOF
@@ -105,7 +130,7 @@ runner-mesh node:join --server ${hostname} --token ${token} --authkey ${authkey}
 EOF
   )"
 
-  printf '%s\n' "${plan}"
+  rm::node::_emit_plan "${plan}"
   rm::warn "the token above is a cluster-join secret — treat it like a password, don't commit it"
   rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
@@ -125,8 +150,6 @@ rm::node::join() {
   [[ -n "${server}" && -n "${token}" && -n "${authkey}" ]] \
     || rm::die "usage: runner-mesh node:join --server <hostname-or-ip> --token <token> --authkey <tailscale-auth-key> [--hostname NAME] [--write-script PATH]"
   [[ -n "${hostname}" ]] || hostname="runner-mesh-$(hostname -s 2>/dev/null || echo agent)"
-
-  rm::node::_warn_if_not_linux
 
   local vpn_auth="name=tailscale,joinKey=${authkey}"
   local plan
@@ -150,7 +173,7 @@ kubectl get nodes
 EOF
   )"
 
-  printf '%s\n' "${plan}"
+  rm::node::_emit_plan "${plan}"
   rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
 
@@ -176,9 +199,17 @@ rm::node::auto() {
 
   if ! command -v tailscale >/dev/null 2>&1; then
     rm::warn "Tailscale isn't installed on this machine yet, so I can't check whether a \
-runner-mesh server already exists on your tailnet. Run this, then re-run 'node:auto':"
-    printf '\ncommand -v tailscale >/dev/null 2>&1 || curl -fsSL %s | sudo sh\nsudo tailscale up --authkey=%s --hostname=%s\n\n' \
-      "${RM_TAILSCALE_INSTALL_URL}" "${authkey}" "$(hostname -s 2>/dev/null || echo runner-mesh-node)"
+runner-mesh server already exists on your tailnet. Install it, then re-run 'node:auto':"
+    if rm::node::_is_macos; then
+      # Host-side Tailscale is only used for the read-only discovery check;
+      # the cluster node's own Tailscale runs inside the colima VM (see the
+      # plan node:init/node:join prints).
+      printf '\nbrew install tailscale && sudo tailscale up --authkey=%s --hostname=%s\n\n' \
+        "${authkey}" "$(hostname -s 2>/dev/null || echo runner-mesh-node)"
+    else
+      printf '\ncommand -v tailscale >/dev/null 2>&1 || curl -fsSL %s | sudo sh\nsudo tailscale up --authkey=%s --hostname=%s\n\n' \
+        "${RM_TAILSCALE_INSTALL_URL}" "${authkey}" "$(hostname -s 2>/dev/null || echo runner-mesh-node)"
+    fi
     return 0
   fi
 
