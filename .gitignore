@@ -1,0 +1,10 @@
+.generated/
+*.local.yaml
+.env
+.envrc
+*.pem
+*.key
+.DS_Store
+.idea/
+.vscode/
+*.log
