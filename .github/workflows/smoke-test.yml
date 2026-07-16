@@ -44,6 +44,17 @@ jobs:
       - name: create k3d cluster
         run: k3d cluster create runner-mesh-ci --wait --timeout 120s
 
+      # k3d's --wait covers node readiness, not API availability — the
+      # server can still refuse connections for a few seconds after,
+      # which flakes whatever runs next. Poll until it actually answers.
+      - name: wait for the API server
+        run: |
+          for _ in $(seq 1 30); do
+            kubectl get --raw /readyz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "API server never became ready"; kubectl cluster-info; exit 1
+
       - name: doctor (toolchain + cluster connectivity)
         run: ./bin/runner-mesh doctor
 

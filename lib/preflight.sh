@@ -61,7 +61,13 @@ rm::preflight::check_gh_auth() {
     rm::warn "gh CLI is installed but not authenticated (run 'gh auth login')"
     return 1
   fi
-  rm::ok "gh CLI authenticated as $(gh api user --jq .login 2>/dev/null || echo unknown)"
+  # gh can exit nonzero yet still print an error body to stdout (e.g. a
+  # workflow token gets 403 on /user), so validate the shape rather than
+  # trusting the exit code — a login is a bare username, not JSON.
+  local login
+  login="$(gh api user --jq .login 2>/dev/null)" || login=""
+  [[ "${login}" =~ ^[A-Za-z0-9-]+$ ]] || login="unknown"
+  rm::ok "gh CLI authenticated as ${login}"
   return 0
 }
 
