@@ -27,9 +27,13 @@ and idempotent.
 
 - **Scale-to-zero**: `minRunners: 0` by default — a runner pod only exists
   while a job is actually queued or running.
-- **Namespace-per-repo isolation**: a compromised job in one repo's runner
-  has no path to another repo's runners by default. See
-  [`docs/architecture.md`](docs/architecture.md).
+- **Configurable namespace layout**: repos share one namespace by default
+  (`RM_NAMESPACE_MODE=shared` — fewer objects, since a GitHub App
+  installation's credentials are identical across every repo it covers
+  anyway), or opt into `per-repo` for namespace-scoped Secret isolation.
+  Neither mode enforces network isolation between repos without your own
+  `NetworkPolicy` yet — see [`docs/security.md`](docs/security.md) for the
+  honest current boundary.
 - **GitHub App auth**, not a PAT: scoped, revocable, not tied to your
   personal account. `app:init` automates everything except the one
   GitHub-mandated browser click. See

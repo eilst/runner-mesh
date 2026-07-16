@@ -2,20 +2,38 @@
 
 ## What a compromised GitHub job can and can't reach
 
-Each job runs in a fresh, ephemeral pod, in a namespace scoped to exactly
-one repo. By default that pod can still reach:
+Each job runs in a fresh, ephemeral pod. By default that pod can still
+reach:
 
 - The internet (to talk to GitHub, pull images, install dependencies).
 - Other pods in the *same* namespace, unless you add a `NetworkPolicy`.
 - Whatever the pod's ServiceAccount is authorized for via RBAC (default:
   minimal, but verify — see checklist below).
+- **Other repos' runner pods, if `RM_NAMESPACE_MODE=shared` (the
+  default)** — Kubernetes namespaces are an organizational/RBAC boundary,
+  not a network boundary. Without a `NetworkPolicy` (and a CNI that
+  enforces it — k3s's default Flannel does not), any pod can reach any
+  other pod's IP across namespaces *and* within one. So today, neither
+  namespace mode gives you network isolation between repos out of the
+  box — `shared` mode just makes that more visible, since the pods are
+  literally colocated; `per-repo` mode looks isolated but isn't yet
+  either, absent `NetworkPolicy`.
+- What **is** namespace-scoped today, in `per-repo` mode: Secrets and the
+  default ServiceAccount. A pod can't read another namespace's Secret
+  without explicit RBAC, so `per-repo` mode does stop one repo's job from
+  directly reading another repo's GitHub App credential Secret. In
+  `shared` mode that boundary doesn't exist — every repo's Secret lives in
+  the same namespace, though a pod still needs it explicitly mounted or
+  RBAC'd to read it, not just proximity.
 
 It should **not**, with a correctly configured cluster, be able to reach
-another repo's namespace, the controller's namespace, or the underlying
-node — but that containment is only as good as your `NetworkPolicy` and
-RBAC configuration, plus the container runtime's isolation. `runner-mesh`
-does not currently ship default-deny `NetworkPolicy` objects out of the box
-— see `docs/roadmap.md`.
+the controller's namespace or the underlying node — but that containment
+is only as good as your `NetworkPolicy` and RBAC configuration, plus the
+container runtime's isolation. `runner-mesh` does not currently ship
+default-deny `NetworkPolicy` objects in either namespace mode — see
+`docs/roadmap.md`. If cross-repo network isolation matters for your trust
+model *today*, before that lands, use `RM_NAMESPACE_MODE=per-repo` and add
+your own `NetworkPolicy` per namespace in the meantime.
 
 ## Public repos are a different risk class
 
