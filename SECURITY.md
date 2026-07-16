@@ -9,9 +9,11 @@ until a first stable release is tagged.
 
 Please **do not** open a public issue for security vulnerabilities.
 
-Instead, use GitHub's private vulnerability reporting for this repository
-(Security tab → "Report a vulnerability"). If that is unavailable, contact
-the repository owner directly through their GitHub profile.
+Instead, use GitHub's private vulnerability reporting:
+<https://github.com/eilst/runner-mesh/security/advisories/new>
+
+If that is unavailable, contact the repository owner directly through
+their GitHub profile: <https://github.com/eilst>.
 
 Include:
 
