@@ -8,17 +8,26 @@
 │                                                                │
 │  ┌── namespace: arc-systems ────────────────────────────────┐│
 │  │  ARC controller (cluster-wide singleton, watches CRDs)    ││
+│  │  Listener pod for repo-a  ← ALWAYS here, not the repo's   ││
+│  │  Listener pod for repo-b    own namespace, in EITHER mode ││
 │  └────────────────────────────────────────────────────────────┘│
 │                                                                │
 │  ┌── namespace: arc-runners (default, RM_NAMESPACE_MODE=shared) ┐│
 │  │  Secret: github-config-secret-org-repo-a                    ││
 │  │  Secret: github-config-secret-org-repo-b                    ││
-│  │  Listener pod for repo-a (watches repo-a's job queue)       ││
-│  │  Listener pod for repo-b (watches repo-b's job queue)       ││
 │  │  Ephemeral runner pod(s) — exist only while a job runs      ││
 │  └────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
+
+Verified by actually running this against a live repo (`eilst/inventario`),
+not just reading chart source: the **listener pod always lands in the
+controller's own namespace** (`arc-systems`), regardless of
+`RM_NAMESPACE_MODE` — this isn't something `runner-mesh` controls, it's how
+ARC itself places it. Only the *ephemeral runner pods* (created when a job
+actually runs) land in the repo's own namespace, via the
+`EphemeralRunnerSet`. This matters for the isolation discussion below —
+see the correction there.
 
 - **Controller** (`cluster:install`): one per cluster. Reconciles
   `AutoscalingRunnerSet` custom resources. Never runs job workloads itself —
@@ -48,18 +57,22 @@ installation carries an *identical* credential (`app_id` /
 `installation_id` / private key — a GitHub App installation covers every
 repo you selected when installing it, it's not a per-repo credential), so
 splitting that into N duplicated Secrets across N namespaces was pure
-overhead with no real isolation benefit today. Tradeoff: pods in different
+overhead with no real isolation benefit today. Tradeoff: **ephemeral
+runner pods** (not listeners — see the correction above) in different
 repos' scale-sets share the namespace's default ServiceAccount and network
 reachability unless you add your own `NetworkPolicy` — see
 `docs/security.md`, this is *not* yet a blast-radius boundary by default.
 
 **`per-repo`** — `arc-runners-<owner>-<repo>` per repo, matching the
 original design. Secrets and the default ServiceAccount become genuinely
-namespace-scoped per repo (a pod can't read another namespace's Secret
-without explicit RBAC), which is real isolation today, before any
-`NetworkPolicy` work lands. Costs more objects (namespace, ServiceAccount,
-RBAC per repo) — negligible at homelab scale, worth knowing about at
-hundreds of repos.
+namespace-scoped per repo for **runner pods** (a pod can't read another
+namespace's Secret without explicit RBAC), which is real isolation today,
+before any `NetworkPolicy` work lands. Costs more objects (namespace,
+ServiceAccount, RBAC per repo) — negligible at homelab scale, worth
+knowing about at hundreds of repos. **Does not extend to listener pods**:
+every repo's listener lives in `arc-systems` regardless of this setting,
+so `per-repo` mode isolates job execution but not the listener processes
+themselves — there's no namespace-mode knob that changes that.
 
 Either way, the Secret name is always `github-config-secret-<owner>-<repo>`
 (never shared literally, even in `shared` mode) so a future per-repo App
