@@ -71,11 +71,11 @@ EOF
 }
 
 main() {
-  local cmd="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
-
-  # Global flags can appear anywhere; scan and strip them.
-  local args=()
+  # Global flags can appear anywhere, including before the command
+  # (e.g. 'runner-mesh --yes cluster:uninstall'), so scan the full
+  # argument list first and only then take the first non-flag token as
+  # the command.
+  local args=() a
   for a in "$@"; do
     case "${a}" in
       --yes|-y) export RM_YES=1 ;;
@@ -83,6 +83,11 @@ main() {
       *) args+=("${a}") ;;
     esac
   done
+
+  local cmd="${args[0]:-}"
+  if [[ ${#args[@]} -gt 0 ]]; then
+    args=("${args[@]:1}")
+  fi
   set -- "${args[@]+"${args[@]}"}"
 
   case "${cmd}" in
