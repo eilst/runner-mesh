@@ -1,0 +1,27 @@
+# Default values for the gha-runner-scale-set-controller chart.
+# This is a cluster-wide singleton — one controller manages every repo's
+# scale-set. Override by editing this file before running `cluster:install`.
+#
+# Deliberately conservative resource requests: the controller only watches
+# CRDs and reconciles Kubernetes objects, it never runs job workloads itself,
+# so it fits comfortably on your smallest node.
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Pin the controller to nodes labeled for control-plane / lightweight duty,
+# leaving "large"-tagged nodes free for actual runner pods. Uncomment and
+# adjust to your own node labels (see docs/architecture.md).
+# nodeSelector:
+#   runner-mesh.dev/size: small
+
+metrics:
+  serviceMonitor:
+    enable: false
