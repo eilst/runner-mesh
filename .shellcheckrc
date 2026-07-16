@@ -1,3 +1,10 @@
 shell=bash
 enable=all
 disable=SC2250,SC2312
+# SC2154 ("referenced but not assigned"): lib/*.sh are checked as separate
+# files by `shellcheck lib/*.sh`, so it can't see variables one file
+# defines (e.g. RM_ROOT in bin/runner-mesh, RM_C_* in lib/log.sh) being
+# used by another — they're all sourced together at runtime in
+# bin/runner-mesh. A real unset-variable typo would still be caught at
+# runtime by `set -u` (bash -o pipefail -eu, see bin/runner-mesh).
+disable=SC2154

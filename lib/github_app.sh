@@ -88,7 +88,7 @@ rm::github_app::init() {
   fi
 
   local redirect_url="http://127.0.0.1:${RM_APP_CALLBACK_PORT}/callback"
-  local manifest form_html form_file code_file code
+  local manifest form_file code_file code
 
   manifest="$(rm::github_app::_manifest_json "${app_name}" "${redirect_url}")"
 
