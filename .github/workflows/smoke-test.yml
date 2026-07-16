@@ -1,0 +1,44 @@
+name: smoke-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  k3d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: install helm
+        uses: azure/setup-helm@v4
+
+      - name: create k3d cluster
+        uses: AbsaOSS/k3d-action@v2
+        with:
+          cluster-name: runner-mesh-ci
+          args: --wait --timeout 120s
+
+      - name: doctor (toolchain + cluster connectivity)
+        run: ./bin/runner-mesh doctor
+
+      - name: cluster:install (real ARC controller install against k3d)
+        run: ./bin/runner-mesh --yes cluster:install
+
+      - name: status
+        run: ./bin/runner-mesh status
+
+      # repos:add is intentionally not exercised here — it requires a real
+      # GitHub App installation, which CI does not have credentials for.
+      # See docs/quickstart-colima.md for the manual end-to-end walkthrough.
+
+      - name: cluster:uninstall
+        if: always()
+        run: ./bin/runner-mesh --yes cluster:uninstall || true
