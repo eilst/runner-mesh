@@ -10,16 +10,32 @@
 > the person who wrote it (no Linux host was available) — validate on
 > your own hardware and report back if something's off.
 
+## One-time network setup: `net:init`
+
+```bash
+runner-mesh net:init
+```
+
+A guided, three-step browser session (the only one Tailscale ever needs):
+sign in / create the tailnet, add `tag:runner-mesh-node` to your ACL's
+`tagOwners`, and create an OAuth client scoped to *Auth Keys: Write* with
+that tag. The client credential is stored at
+`~/.config/runner-mesh/tailscale.json` (0600) and can be sealed into the
+fleet repo with `fleet:seal`. From then on, `net:key` mints tagged,
+single-use, pre-authorized auth keys from the terminal — and `node:*`
+mints them implicitly, so no `--authkey` flag is ever needed on a
+configured machine.
+
 ## Quickest path: `node:auto`
 
-Same two secrets, same command, on every machine, in any order:
+One secret, same command, on every machine, in any order:
 
 ```bash
 # Generate a shared cluster secret once, keep it like a password:
 openssl rand -hex 32
-# Get a reusable Tailscale auth key from https://login.tailscale.com/admin/settings/keys
 
-runner-mesh node:auto --authkey <tailscale-auth-key> --secret <the-shared-secret>
+runner-mesh node:auto --secret <the-shared-secret>
+# (--authkey only needed on machines without net:init/an unsealed fleet credential)
 ```
 
 The first machine you run this on won't find an existing server (checked

@@ -21,7 +21,7 @@ export RM_ROOT
 
 # Each lib is sourced if present, so the CLI stays runnable while a command's
 # implementation lands in its own commit.
-for _rm_lib in log preflight cluster github_app repos status node fleet migrate; do
+for _rm_lib in log preflight cluster github_app net repos status node fleet migrate; do
   if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
     # shellcheck source=/dev/null
     source "${RM_ROOT}/lib/${_rm_lib}.sh"
@@ -38,6 +38,11 @@ USAGE
 
 COMMANDS
   doctor              Verify local toolchain and cluster connectivity
+
+  net:init              One guided browser setup for Tailscale (account,
+                        tag ACL, OAuth client) — after it, auth keys mint
+                        from the terminal and node:* needs no --authkey
+  net:key                Mint a tagged single-use Tailscale auth key
 
   node:init             Print the plan to bootstrap this machine as the
                         first k3s cluster node (Tailscale-meshed)
@@ -120,6 +125,8 @@ main() {
     fleet:init)          rm::fleet::init "$@" ;;
     fleet:apply)         rm::fleet::apply "$@" ;;
     fleet:seal)          rm::fleet::seal "$@" ;;
+    net:init)            rm::net::init "$@" ;;
+    net:key)             rm::net::key "$@" ;;
     version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;
     -h|--help|help|"")  rm::usage ;;
     *)
