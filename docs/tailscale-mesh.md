@@ -1,10 +1,45 @@
 # Multi-node clusters over Tailscale
 
-> **Status: documented, not yet scripted.** `runner-mesh` today assumes you
-> already have a working `kubectl` context (see `docs/roadmap.md`). This
-> page documents the real, supported path for joining multiple machines —
-> including ones that leave your LAN — into one cluster; wrapping it in a
-> `runner-mesh cluster:join` command is tracked as a roadmap item.
+> **Status: `node:init`/`node:join`/`node:auto` plan this for you** — they
+> validate inputs, generate the join token if needed, do read-only
+> Tailscale discovery, and print the exact commands below with your
+> values filled in. They deliberately don't execute anything privileged
+> themselves (no `curl | sudo sh` run on your behalf) — you review and run
+> the printed commands, or pass `--write-script <path>` to save them to a
+> file first. This has not been exercised against a real k3s install by
+> the person who wrote it (no Linux host was available) — validate on
+> your own hardware and report back if something's off.
+
+## Quickest path: `node:auto`
+
+Same two secrets, same command, on every machine, in any order:
+
+```bash
+# Generate a shared cluster secret once, keep it like a password:
+openssl rand -hex 32
+# Get a reusable Tailscale auth key from https://login.tailscale.com/admin/settings/keys
+
+runner-mesh node:auto --authkey <tailscale-auth-key> --secret <the-shared-secret>
+```
+
+The first machine you run this on won't find an existing server (checked
+via read-only `tailscale status`) and becomes one. Every machine after
+that finds it and joins as an agent. If you run it on two machines at the
+exact same moment before either has become the server, both may try to —
+stagger the first run by ~30 seconds instead of racing them.
+
+## Explicit path: `node:init` / `node:join`
+
+More control, same underlying plan, split into two steps:
+
+```bash
+# On the machine that becomes your control plane:
+runner-mesh node:init --authkey <tailscale-auth-key>
+# → prints the exact node:join command with the generated token filled in
+
+# On every additional machine, run what it printed:
+runner-mesh node:join --server runner-mesh-server --token <printed-token> --authkey <tailscale-auth-key>
+```
 
 ## Why Tailscale here
 
