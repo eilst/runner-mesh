@@ -158,7 +158,7 @@ rm::repos::_provision_one() {
   # under one App installation carries identical credentials today but must
   # not collide if a future installation differs per repo.
   local key_file
-  key_file="$(mktemp -t runner-mesh-key.XXXXXX.pem)"
+  key_file="$(rm::mktemp_suffixed runner-mesh-key .pem)"
   jq -r .private_key "${RM_APP_CONFIG}" > "${key_file}"
   kubectl -n "${namespace}" create secret generic "${secret_name}" \
     --from-literal=github_app_id="${app_id}" \
