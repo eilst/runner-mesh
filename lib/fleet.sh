@@ -6,6 +6,12 @@
 # engine, so config repos never need upstream fixes.
 # Intended to be sourced, not executed.
 
+# Cluster-admin kubeconfig an operator may choose to seal into the fleet
+# repo (server: should point at the control plane's Tailscale IP so it
+# works from any tailnet machine). Sourced after github_app.sh, which
+# defines RM_CONFIG_DIR.
+RM_KUBECONFIG="${RM_KUBECONFIG:-${RM_CONFIG_DIR}/kubeconfig.yaml}"
+
 rm::fleet::_parse_repos() {
   # Prints one owner/repo per line from a repos.txt, stripping comments,
   # whitespace, and blank lines.
@@ -144,14 +150,19 @@ rm::fleet::seal() {
 
   mkdir -p "${dir}/secrets"
   # Seals every operator credential present: the GitHub App file always
-  # (require_config above), the Tailscale OAuth client when configured.
-  local src base
-  for src in "${RM_APP_CONFIG}" "${RM_TS_CONFIG:-}"; do
+  # (require_config above), the Tailscale OAuth client when configured,
+  # and the cluster-admin kubeconfig (drop it at
+  # ${RM_CONFIG_DIR}/kubeconfig.yaml, with server: set to the control
+  # plane's Tailscale IP) so new operator machines get kubectl/k9s access
+  # from clone + age key alone. NEVER commit any of these unencrypted.
+  local src base ext
+  for src in "${RM_APP_CONFIG}" "${RM_TS_CONFIG:-}" "${RM_KUBECONFIG:-}"; do
     [[ -n "${src}" && -f "${src}" ]] || continue
-    base="$(basename "${src}" .json)"
-    sops --encrypt --age "${pubkey}" --output "${dir}/secrets/${base}.enc.json" "${src}" \
+    ext="${src##*.}"
+    base="$(basename "${src}" ".${ext}")"
+    sops --encrypt --age "${pubkey}" --output "${dir}/secrets/${base}.enc.${ext}" "${src}" \
       || rm::die "sops encryption failed for ${base}"
-    rm::ok "sealed ${base} -> ${dir}/secrets/${base}.enc.json (commit this)"
+    rm::ok "sealed ${base} -> ${dir}/secrets/${base}.enc.${ext} (commit this)"
   done
   rm::log "to let another machine unseal: copy ${RM_AGE_KEY_FILE} to it over a"
   rm::info "secure channel (one line — this is the fleet's secret zero; never commit it)"
@@ -162,12 +173,13 @@ rm::fleet::seal() {
 # alone (app:init on this machine is newer truth than the repo until the
 # operator re-seals).
 rm::fleet::_unseal() {
-  local config_dir="$1" sealed base target found=0
-  for sealed in "${config_dir}"/secrets/*.enc.json; do
+  local config_dir="$1" sealed base ext target found=0
+  for sealed in "${config_dir}"/secrets/*.enc.json "${config_dir}"/secrets/*.enc.yaml; do
     [[ -f "${sealed}" ]] || continue
     found=1
-    base="$(basename "${sealed}" .enc.json)"
-    target="${RM_CONFIG_DIR}/${base}.json"
+    ext="${sealed##*.}"
+    base="$(basename "${sealed}" ".enc.${ext}")"
+    target="${RM_CONFIG_DIR}/${base}.${ext}"
     [[ -f "${target}" ]] && continue
     if ! command -v sops >/dev/null 2>&1; then
       rm::warn "sealed credentials present but sops isn't installed (brew install sops)"
@@ -283,7 +295,7 @@ net-init: ## one-time guided Tailscale setup (account, tag ACL, OAuth client)
 	$(ENGINE) net:init
 
 k9s: ## open k9s in the controller namespace (listeners live here too)
-	k9s -n arc-systems
+	@KUBECONFIG=$${KUBECONFIG:-$$([ -f ~/.kube/config ] && echo ~/.kube/config || echo ~/.config/runner-mesh/kubeconfig.yaml)} k9s -n arc-systems
 
 watch-runners: ## watch ephemeral runner pods come and go as jobs run
 	kubectl get pods -n arc-runners --watch
