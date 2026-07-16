@@ -92,7 +92,9 @@ rm::github_app::init() {
 
   manifest="$(rm::github_app::_manifest_json "${app_name}" "${redirect_url}")"
 
-  form_file="$(mktemp -t runner-mesh-manifest.XXXXXX.html)"
+  # .html suffix matters here: 'open' needs it to find a browser to hand
+  # the file to. See rm::mktemp_suffixed for why plain mktemp can't do this.
+  form_file="$(rm::mktemp_suffixed runner-mesh-manifest .html)"
   cat > "${form_file}" <<HTMLEOF
 <html><body onload="document.forms[0].submit()">
 <form action="https://github.com/settings/apps/new" method="post">
@@ -152,7 +154,7 @@ rm::github_app::_jwt() {
   rm::github_app::require_config
   local app_id key_file header payload signing_input signature
   app_id="$(jq -r .app_id "${RM_APP_CONFIG}")"
-  key_file="$(mktemp -t runner-mesh-key.XXXXXX.pem)"
+  key_file="$(rm::mktemp_suffixed runner-mesh-key .pem)"
   jq -r .private_key "${RM_APP_CONFIG}" > "${key_file}"
   trap 'rm -f "${key_file}"' RETURN
 
