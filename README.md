@@ -239,6 +239,7 @@ them and tells you exactly what's missing.
 | `fleet:init [dir]` | Scaffold a data-only fleet config repo (repos, pins, values, shim, Makefile) |
 | `fleet:apply [dir] [--prune]` | Converge the cluster on the declared state; `--prune` removes undeclared pools |
 | `fleet:seal [dir]` | Encrypt operator credentials into the fleet repo (SOPS+age); `apply` auto-unseals |
+| `fleet:gitops [dir]` | Generate a Flux CD layout so the cluster reconciles itself from git — see [`docs/gitops-flux.md`](docs/gitops-flux.md) |
 | `net:init` | One guided Tailscale setup (account, tag ACL, OAuth client) |
 | `net:key` | Mint a tagged, single-use Tailscale auth key from the terminal |
 | `cluster:install` / `cluster:uninstall` | ARC controller lifecycle (cluster-wide, once) |
@@ -263,6 +264,8 @@ Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
   local walkthrough
 - [`docs/onboarding.md`](docs/onboarding.md) — founding a fleet, adding
   worker/operator machines, the secret matrix, with a flow diagram
+- [`docs/gitops-flux.md`](docs/gitops-flux.md) — GitOps mode: Flux reconciles
+  the fleet from git, push-to-converge
 - [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md) — joining multiple
   machines (including macOS-via-colima and roaming laptops) into one cluster
 - [`docs/security.md`](docs/security.md) — threat model and hardening
