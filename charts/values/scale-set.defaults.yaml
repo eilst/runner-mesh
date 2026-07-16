@@ -25,6 +25,11 @@ template:
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
+        # Overriding the runner container REPLACES the chart's container
+        # spec wholesale — without restating command, the pod starts with
+        # no process, exits 0 in silence, and every job stays queued while
+        # the scale set churns fresh pods forever.
+        command: ["/home/runner/run.sh"]
         resources:
           requests:
             cpu: "250m"

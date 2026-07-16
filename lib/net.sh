@@ -7,6 +7,9 @@
 
 RM_TS_CONFIG="${RM_TS_CONFIG:-${RM_CONFIG_DIR}/tailscale.json}"
 RM_TS_TAG="${RM_TS_TAG:-tag:runner-mesh-node}"
+# k3s's default cluster CIDR — pod subnets each node advertises over
+# Tailscale. Override if your cluster uses a custom --cluster-cidr.
+RM_K3S_POD_CIDR="${RM_K3S_POD_CIDR:-10.42.0.0/16}"
 RM_TS_API="https://api.tailscale.com/api/v2"
 
 rm::net::require_config() {
@@ -28,9 +31,14 @@ rm::net::init() {
   rm::github_app::_open_browser "https://login.tailscale.com/start"
   read -r -p "  ...press Enter once you're signed in: " _
 
-  rm::log "Step 2/3 — allow the runner-mesh device tag"
+  rm::log "Step 2/3 — allow the runner-mesh device tag + pod routes"
   rm::info "in the ACL editor that just opened, add this inside \"tagOwners\":"
   printf '\n    "%s": ["autogroup:admin"],\n\n' "${RM_TS_TAG}" >&2
+  rm::info "and this top-level block (k3s advertises each node's pod CIDR as a"
+  rm::info "subnet route; without auto-approval, cross-node pod traffic — e.g."
+  rm::info "DNS lookups from agent-node pods to CoreDNS — silently fails):"
+  printf '\n    "autoApprovers": {\n      "routes": {\n        "%s": ["%s"],\n      },\n    },\n\n' \
+    "${RM_K3S_POD_CIDR}" "${RM_TS_TAG}" >&2
   rm::github_app::_open_browser "https://login.tailscale.com/admin/acls/file"
   read -r -p "  ...press Enter once saved: " _
 
