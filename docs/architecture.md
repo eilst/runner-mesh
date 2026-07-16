@@ -10,14 +10,12 @@
 │  │  ARC controller (cluster-wide singleton, watches CRDs)    ││
 │  └────────────────────────────────────────────────────────────┘│
 │                                                                │
-│  ┌── namespace: arc-runners-org-repo-a ──────────────────────┐│
-│  │  Secret: github-config-secret (App id/installation/key)   ││
-│  │  Listener pod (1, watches org/repo-a's job queue)          ││
-│  │  Ephemeral runner pod(s) — exist only while a job runs     ││
-│  └────────────────────────────────────────────────────────────┘│
-│                                                                │
-│  ┌── namespace: arc-runners-org-repo-b ──────────────────────┐│
-│  │  (same shape, fully isolated from repo-a)                  ││
+│  ┌── namespace: arc-runners (default, RM_NAMESPACE_MODE=shared) ┐│
+│  │  Secret: github-config-secret-org-repo-a                    ││
+│  │  Secret: github-config-secret-org-repo-b                    ││
+│  │  Listener pod for repo-a (watches repo-a's job queue)       ││
+│  │  Listener pod for repo-b (watches repo-b's job queue)       ││
+│  │  Ephemeral runner pod(s) — exist only while a job runs      ││
 │  └────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -25,20 +23,47 @@
 - **Controller** (`cluster:install`): one per cluster. Reconciles
   `AutoscalingRunnerSet` custom resources. Never runs job workloads itself —
   see the small resource requests in `charts/values/controller.values.yaml`.
-- **Scale-set** (`repos:add`): one per repo, in its own namespace. Its
-  listener pod watches that repo's GitHub Actions job queue and creates a
-  fresh, single-use runner pod per queued job using a JIT (just-in-time)
-  token minted by the controller — never a long-lived registration token.
-  When idle, `minRunners: 0` means no runner pods exist at all.
+- **Scale-set** (`repos:add`): one per repo, always its own Helm release and
+  listener pod — ARC requires one listener per repo's job queue regardless
+  of namespace layout, so namespace choice doesn't change that cost. When
+  idle, `minRunners: 0` means no runner pods exist at all.
 
-## Why namespace-per-repo
+## Namespace mode: shared vs. per-repo
 
-A compromised job in one repo's runner should not have a network or RBAC
-path to another repo's runners, secrets, or the cluster's control plane.
-Namespace boundaries plus `NetworkPolicy` (see `docs/security.md`) are the
-blast-radius control for that. It costs a little more YAML per repo than one
-shared namespace; that cost buys isolation that matters once you're running
-CI for more than one trust boundary.
+Namespace objects themselves are free (a small etcd record, no reserved
+CPU/memory) — the real per-repo cost is the listener pod, which exists
+either way. So namespace layout is a pure isolation-vs-object-count
+tradeoff, and it's configurable:
+
+```bash
+export RM_NAMESPACE_MODE=shared      # default — all repos in one namespace
+export RM_SHARED_NAMESPACE=arc-runners  # override the shared namespace name
+
+export RM_NAMESPACE_MODE=per-repo    # arc-runners-<owner>-<repo>, one each
+```
+
+**`shared` (default)** — every repo's scale-set lands in one namespace.
+Fewer objects to manage, and notably: every repo under the same GitHub App
+installation carries an *identical* credential (`app_id` /
+`installation_id` / private key — a GitHub App installation covers every
+repo you selected when installing it, it's not a per-repo credential), so
+splitting that into N duplicated Secrets across N namespaces was pure
+overhead with no real isolation benefit today. Tradeoff: pods in different
+repos' scale-sets share the namespace's default ServiceAccount and network
+reachability unless you add your own `NetworkPolicy` — see
+`docs/security.md`, this is *not* yet a blast-radius boundary by default.
+
+**`per-repo`** — `arc-runners-<owner>-<repo>` per repo, matching the
+original design. Secrets and the default ServiceAccount become genuinely
+namespace-scoped per repo (a pod can't read another namespace's Secret
+without explicit RBAC), which is real isolation today, before any
+`NetworkPolicy` work lands. Costs more objects (namespace, ServiceAccount,
+RBAC per repo) — negligible at homelab scale, worth knowing about at
+hundreds of repos.
+
+Either way, the Secret name is always `github-config-secret-<owner>-<repo>`
+(never shared literally, even in `shared` mode) so a future per-repo App
+installation doesn't collide with today's shared one.
 
 ## Two layers of runner limits
 

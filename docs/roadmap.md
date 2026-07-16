@@ -17,9 +17,18 @@
 - `cluster:join` — script the k3s `--vpn-auth` Tailscale bootstrap
   described in `docs/tailscale-mesh.md` instead of leaving it as a manual
   walkthrough
-- Default `NetworkPolicy` objects generated per repo namespace
-  (default-deny except to the internet and the controller), see
-  `docs/security.md`
+- Default `NetworkPolicy` objects generated per repo (default-deny except
+  to the internet and the controller) — needed in **both** namespace
+  modes: `shared` colocates repos in one namespace with no policy today,
+  and `per-repo` looks isolated by namespace but isn't actually network-
+  enforced either without this. In `per-repo` mode this selects by
+  namespace; in `shared` mode it needs to select by a per-repo pod label
+  instead. See `docs/security.md`.
+- `ResourceQuota`/`LimitRange` per repo namespace (or per-repo label
+  selector in `shared` mode) — today `maxRunners` and pod resource limits
+  cap one repo's pod count and per-pod usage, but nothing caps a repo's
+  *aggregate* footprint, so a busy repo can still starve others for
+  capacity even though it can't exceed its own `maxRunners`.
 - `app:rotate` — rotate GitHub App credentials and push the update to
   every provisioned repo's secret in one step, instead of requiring a
   manual `repos:add` re-run per repo
