@@ -175,6 +175,32 @@ exec "\${ENGINE}/bin/runner-mesh" fleet:apply "\${HERE}" "\$@"
 EOF
   chmod +x "${dir}/bootstrap.sh"
 
+  # Day-2 conveniences. Engine commands go through the shim-fetched engine
+  # so they always match the pin; k9s/kubectl just use the current context.
+  cat > "${dir}/Makefile" <<'EOF'
+ENGINE := .runner-mesh/bin/runner-mesh
+
+.PHONY: apply prune status doctor k9s watch-runners
+
+apply: ## converge this machine on the declared fleet state
+	./bootstrap.sh
+
+prune: ## also remove scale-sets no longer in repos.txt
+	./bootstrap.sh --prune
+
+status: ## controller + per-repo runner pool health
+	$(ENGINE) status
+
+doctor: ## verify toolchain and cluster connectivity
+	$(ENGINE) doctor
+
+k9s: ## open k9s in the controller namespace (listeners live here too)
+	k9s -n arc-systems
+
+watch-runners: ## watch ephemeral runner pods come and go as jobs run
+	kubectl get pods -n arc-runners --watch
+EOF
+
   cat > "${dir}/README.md" <<'EOF'
 # Fleet config for runner-mesh
 
@@ -188,17 +214,22 @@ Data-only config repo (plus a small delegating shim) for
 | `runner-mesh.version` | Engine git ref (tag/branch/commit) — bump to upgrade |
 | `values/` | Committed per-repo overrides, synced on every apply |
 | `bootstrap.sh` | Shim: fetch pinned engine → `runner-mesh fleet:apply` |
+| `Makefile` | Day-2 targets: `apply`, `prune`, `status`, `doctor`, `k9s`, `watch-runners` |
 
 ## Any machine, any time (idempotent)
 
 ```bash
-./bootstrap.sh            # converge this machine on the declared state
-./bootstrap.sh --prune    # also remove scale-sets no longer in repos.txt
+make apply     # converge this machine on the declared state (./bootstrap.sh)
+make prune     # also remove scale-sets no longer in repos.txt
+make status    # controller + per-repo runner pool health
+make k9s       # inspect the cluster (controller + listeners namespace)
 ```
 
-One-time per fleet: `./.runner-mesh/bin/runner-mesh app:init` on your
-first machine. Additional machines need `~/.config/runner-mesh/github-app.json`
-copied over a secure channel — deliberately never committed.
+`make status`/`doctor`/`k9s` need the engine present — run `make apply`
+once on a fresh clone first. One-time per fleet:
+`./.runner-mesh/bin/runner-mesh app:init` on your first machine.
+Additional machines need `~/.config/runner-mesh/github-app.json` copied
+over a secure channel — deliberately never committed.
 EOF
 
   rm::ok "fleet config scaffolded in ${dir} (engine pinned to ${engine_ref})"
