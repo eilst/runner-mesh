@@ -1,0 +1,34 @@
+# Default values applied to every repo's gha-runner-scale-set release.
+# runner-mesh layers a small per-repo overrides file (githubConfigUrl) on
+# top of this at `repos:add` time. Edit this file to change the fleet-wide
+# defaults, or edit the generated per-repo file at
+# ~/.config/runner-mesh/repos/<owner>-<repo>.values.yaml for a one-off
+# override, then re-run `repos:add <owner>/<repo>` to apply (idempotent).
+#
+# Full chart schema (verify against your installed chart version):
+#   helm show values oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+# Business-level cap, independent of what the cluster can physically fit.
+# 0 idle runners: pods only exist while a job is actually queued/running.
+minRunners: 0
+maxRunners: 4
+
+containerMode:
+  type: "dind"
+
+template:
+  spec:
+    # Uncomment to keep job runners off your smallest machine — see
+    # docs/architecture.md for the node-labeling convention.
+    # nodeSelector:
+    #   runner-mesh.dev/size: large
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
