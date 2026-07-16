@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
 # repos:list / repos:add / repos:remove — the per-repository layer on top of
-# the shared ARC controller. Each repo gets its own namespace and Helm
-# release ("scale-set"), isolated from every other repo's runners.
+# the shared ARC controller. Each repo gets its own Helm release ("scale-set")
+# — that's one listener pod per repo either way, it's what ARC requires —
+# but namespace placement is configurable:
+#
+#   RM_NAMESPACE_MODE=shared    (default) — all repos share one namespace
+#                                 (RM_SHARED_NAMESPACE, default arc-runners).
+#                                 Fewer objects to manage; a compromised job
+#                                 in one repo's runner pod is *not* network-
+#                                 or RBAC-isolated from another repo's pods
+#                                 in the same namespace without additional
+#                                 NetworkPolicy/RBAC of your own.
+#   RM_NAMESPACE_MODE=per-repo  — arc-runners-<owner>-<repo>, one namespace
+#                                 each. More objects, but Secrets and the
+#                                 default ServiceAccount are namespace-scoped
+#                                 boundaries — see docs/security.md.
+#
 # Intended to be sourced, not executed.
 
 RM_REPOS_CHART="oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set"
 RM_REPOS_STATE_DIR="${RM_REPOS_STATE_DIR:-${RM_CONFIG_DIR}/repos}"
+RM_NAMESPACE_MODE="${RM_NAMESPACE_MODE:-shared}"
+RM_SHARED_NAMESPACE="${RM_SHARED_NAMESPACE:-arc-runners}"
 
 rm::repos::_slug() {
   # owner/repo -> owner-repo, lowercased, safe for k8s names (RFC 1123).
@@ -13,8 +29,15 @@ rm::repos::_slug() {
   printf '%s' "${full}" | tr '[:upper:]' '[:lower:]' | tr '/' '-' | tr -c 'a-z0-9-' '-'
 }
 
-rm::repos::_namespace() { printf 'arc-runners-%s\n' "$(rm::repos::_slug "$1")"; }
-rm::repos::_release()   { rm::repos::_slug "$1"; }
+rm::repos::_namespace() {
+  case "${RM_NAMESPACE_MODE}" in
+    shared)   printf '%s\n' "${RM_SHARED_NAMESPACE}" ;;
+    per-repo) printf 'arc-runners-%s\n' "$(rm::repos::_slug "$1")" ;;
+    *)        rm::die "invalid RM_NAMESPACE_MODE '${RM_NAMESPACE_MODE}' (want 'shared' or 'per-repo')" ;;
+  esac
+}
+rm::repos::_release()     { rm::repos::_slug "$1"; }
+rm::repos::_secret_name() { printf 'github-config-secret-%s\n' "$(rm::repos::_slug "$1")"; }
 rm::repos::_values_file() { printf '%s/%s.values.yaml\n' "${RM_REPOS_STATE_DIR}" "$(rm::repos::_slug "$1")"; }
 
 rm::repos::_installation_id() {
@@ -118,22 +141,26 @@ rm::repos::_provision_one() {
   local repo="$1"
   [[ "${repo}" == */* ]] || rm::die "expected 'owner/repo', got '${repo}'"
 
-  local namespace release values_file installation_id app_id
+  local namespace release secret_name values_file installation_id app_id
   namespace="$(rm::repos::_namespace "${repo}")"
   release="$(rm::repos::_release "${repo}")"
+  secret_name="$(rm::repos::_secret_name "${repo}")"
   values_file="$(rm::repos::_values_file "${repo}")"
   installation_id="$(rm::repos::_installation_id)"
   app_id="$(jq -r .app_id "${RM_APP_CONFIG}")"
 
-  rm::log "Provisioning ${repo} -> namespace '${namespace}'"
+  rm::log "Provisioning ${repo} -> namespace '${namespace}' (mode: ${RM_NAMESPACE_MODE})"
 
   kubectl get namespace "${namespace}" >/dev/null 2>&1 \
     || kubectl create namespace "${namespace}" >/dev/null
 
+  # Secret is named per-repo even in shared-namespace mode, since every repo
+  # under one App installation carries identical credentials today but must
+  # not collide if a future installation differs per repo.
   local key_file
   key_file="$(mktemp -t runner-mesh-key.XXXXXX.pem)"
   jq -r .private_key "${RM_APP_CONFIG}" > "${key_file}"
-  kubectl -n "${namespace}" create secret generic github-config-secret \
+  kubectl -n "${namespace}" create secret generic "${secret_name}" \
     --from-literal=github_app_id="${app_id}" \
     --from-literal=github_app_installation_id="${installation_id}" \
     --from-file=github_app_private_key="${key_file}" \
@@ -146,7 +173,7 @@ rm::repos::_provision_one() {
 # charts/values/scale-set.defaults.yaml — edit those for changes that
 # should apply everywhere, or override here for ${repo} specifically.
 githubConfigUrl: "https://github.com/${repo}"
-githubConfigSecret: github-config-secret
+githubConfigSecret: ${secret_name}
 EOF
   fi
 
@@ -167,9 +194,10 @@ rm::repos::remove() {
   local repo="${1:-}"
   [[ -n "${repo}" ]] || rm::die "usage: runner-mesh repos:remove <owner>/<repo>"
 
-  local namespace release
+  local namespace release secret_name
   namespace="$(rm::repos::_namespace "${repo}")"
   release="$(rm::repos::_release "${repo}")"
+  secret_name="$(rm::repos::_secret_name "${repo}")"
 
   rm::repos::_is_provisioned "${repo}" || rm::die "${repo} is not provisioned"
 
@@ -177,8 +205,17 @@ rm::repos::remove() {
 
   helm uninstall "${release}" --namespace "${namespace}" \
     || rm::die "helm uninstall failed"
-  kubectl delete namespace "${namespace}" --ignore-not-found=true >/dev/null
+  kubectl -n "${namespace}" delete secret "${secret_name}" --ignore-not-found=true >/dev/null
   rm -f "$(rm::repos::_values_file "${repo}")"
+
+  # Only remove the namespace itself once nothing else lives in it — in
+  # shared mode that's everything else provisioned, so this simply won't
+  # fire until the last repo is removed.
+  local remaining
+  remaining="$(helm list --namespace "${namespace}" -q 2>/dev/null || true)"
+  if [[ -z "${remaining}" ]]; then
+    kubectl delete namespace "${namespace}" --ignore-not-found=true >/dev/null
+  fi
 
   rm::ok "${repo} runners removed"
 }
