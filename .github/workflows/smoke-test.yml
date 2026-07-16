@@ -11,6 +11,12 @@ permissions:
 jobs:
   k3d:
     runs-on: ubuntu-latest
+    # doctor checks 'gh auth status', which needs a token even though this
+    # job never calls the GitHub API for real — the default Actions token
+    # is enough to satisfy the check (repos:*/app:init, which actually use
+    # gh, aren't exercised here; see the note below).
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
