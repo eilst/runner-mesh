@@ -26,8 +26,10 @@ jobs:
           persist-credentials: false
       - name: yamllint
         run: |
-          pip install --quiet yamllint
-          yamllint -d "{extends: default, rules: {line-length: disable}}" \
+          pip install --quiet yamllint==1.38.0
+          # document-start: "---" markers are stylistic; truthy: the required
+          # GitHub Actions "on:" key false-positives as a boolean.
+          yamllint -d "{extends: default, rules: {line-length: disable, document-start: disable, truthy: {check-keys: false}}}" \
             charts/values .github/workflows
 
   syntax:

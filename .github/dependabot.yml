@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Let new releases age before auto-PRing them: a freshly-published
+    # malicious version (compromised maintainer, tag hijack) gets caught
+    # by the ecosystem within days; the cooldown keeps us out of the
+    # blast radius of day-zero supply-chain attacks.
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]

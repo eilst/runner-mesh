@@ -32,16 +32,28 @@ jobs:
       # execution — just a binary, chmod'd and run later like any other
       # CLI tool) rather than a third-party wrapper action:
       # AbsaOSS/k3d-action@v2 was pinned to a k3d release whose install URL
-      # started 404ing, breaking every CI run.
+      # started 404ing, breaking every CI run. Version-pinned; Dependabot
+      # doesn't track this URL, so bump deliberately.
       - name: install k3d
         run: |
           curl -fsSL -o /usr/local/bin/k3d \
-            https://github.com/k3d-io/k3d/releases/latest/download/k3d-linux-amd64
+            https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64
           chmod +x /usr/local/bin/k3d
           k3d version
 
       - name: create k3d cluster
         run: k3d cluster create runner-mesh-ci --wait --timeout 120s
+
+      # k3d's --wait covers node readiness, not API availability — the
+      # server can still refuse connections for a few seconds after,
+      # which flakes whatever runs next. Poll until it actually answers.
+      - name: wait for the API server
+        run: |
+          for _ in $(seq 1 30); do
+            kubectl get --raw /readyz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "API server never became ready"; kubectl cluster-info; exit 1
 
       - name: doctor (toolchain + cluster connectivity)
         run: ./bin/runner-mesh doctor
