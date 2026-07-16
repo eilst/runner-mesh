@@ -104,6 +104,14 @@ and idempotent.
   personal account. `app:init` automates everything except the one
   GitHub-mandated browser click. See
   [`docs/github-app-setup.md`](docs/github-app-setup.md).
+- **No GitHub org required**: GitHub's own org-level runners need an org
+  you administer, full stop — there's no equivalent for personal accounts.
+  GitHub Apps don't have that restriction: you can create one on your
+  personal account and install it on any personal repos you own, so
+  `runner-mesh` works the same way whether your repos live under an org or
+  under your personal account. This is *why* the tool is built on the App
+  model instead of org runner groups — see
+  ["Why this works without a GitHub org"](docs/github-app-setup.md#why-this-works-without-a-github-org).
 - **Two-layer runner limits**: business-level `maxRunners` per repo, plus
   real pod `resources.requests`/`limits` as the physical ceiling — both
   configurable, neither alone sufficient. See
