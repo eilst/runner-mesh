@@ -138,8 +138,16 @@ rm::repos::add() {
 }
 
 rm::repos::_provision_one() {
-  local repo="$1"
-  [[ "${repo}" == */* ]] || rm::die "expected 'owner/repo', got '${repo}'"
+  # Accepts owner/repo or owner/repo@profile — a profile is an additional,
+  # separately-named pool for the same repo (e.g. @large → scale-set
+  # 'owner-repo-large', which is exactly what jobs put in runs-on). Size
+  # tiers in the scale-set world are separate named pools, since GitHub
+  # routes by name only; each profile gets its own values file for bigger
+  # resources and/or a nodeSelector.
+  local repo="$1" gh_repo
+  gh_repo="${repo%%@*}"
+  [[ "${gh_repo}" == */* && "${repo}" != *@ ]] \
+    || rm::die "expected 'owner/repo' or 'owner/repo@profile', got '${repo}'"
 
   local namespace release secret_name values_file installation_id app_id
   namespace="$(rm::repos::_namespace "${repo}")"
@@ -172,7 +180,8 @@ rm::repos::_provision_one() {
 # Per-repo overrides for ${repo}. Fleet-wide defaults live in
 # charts/values/scale-set.defaults.yaml — edit those for changes that
 # should apply everywhere, or override here for ${repo} specifically.
-githubConfigUrl: "https://github.com/${repo}"
+# runner-mesh-entry: ${repo}
+githubConfigUrl: "https://github.com/${gh_repo}"
 githubConfigSecret: ${secret_name}
 EOF
   fi

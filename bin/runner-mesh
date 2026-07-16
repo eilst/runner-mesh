@@ -21,7 +21,7 @@ export RM_ROOT
 
 # Each lib is sourced if present, so the CLI stays runnable while a command's
 # implementation lands in its own commit.
-for _rm_lib in log preflight cluster github_app repos status node fleet; do
+for _rm_lib in log preflight cluster github_app repos status node fleet migrate; do
   if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
     # shellcheck source=/dev/null
     source "${RM_ROOT}/lib/${_rm_lib}.sh"
@@ -56,6 +56,8 @@ COMMANDS
   repos:audit [path]     Scan a checkout's workflows: which runs-on targets
                         actually reach a provisioned scale-set (name-only
                         matching — label arrays never do)
+  repos:migrate <path>   Rewrite runs-on targets per an explicit
+                        --map 'labels=name' mapping; --pr opens a draft PR
   status                Show controller + per-repo runner pool health
 
   fleet:init [dir]       Scaffold a data-only fleet config repo (repos.txt,
@@ -110,6 +112,7 @@ main() {
     repos:add)           rm::repos::add "$@" ;;
     repos:remove)        rm::repos::remove "$@" ;;
     repos:audit)         rm::repos::audit "$@" ;;
+    repos:migrate)       rm::migrate::run "$@" ;;
     status)             rm::status::run "$@" ;;
     fleet:init)          rm::fleet::init "$@" ;;
     fleet:apply)         rm::fleet::apply "$@" ;;

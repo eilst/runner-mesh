@@ -96,7 +96,11 @@ rm::fleet::_prune() {
     done
     [[ "${keep}" == "1" ]] && continue
 
-    url="$(grep -E '^githubConfigUrl:' "${RM_REPOS_STATE_DIR}/${release}.values.yaml" 2>/dev/null \
+    # Prefer the entry marker (preserves an @profile suffix, which the
+    # githubConfigUrl necessarily loses); fall back to the URL for values
+    # files generated before the marker existed.
+    url="$(sed -nE 's|^# runner-mesh-entry:[[:space:]]*||p' "${RM_REPOS_STATE_DIR}/${release}.values.yaml" 2>/dev/null | head -1)"
+    [[ -n "${url}" ]] || url="$(grep -E '^githubConfigUrl:' "${RM_REPOS_STATE_DIR}/${release}.values.yaml" 2>/dev/null \
       | sed -E 's|^githubConfigUrl:[[:space:]]*"?https://github.com/([^"]+)"?.*|\1|')"
     if [[ -z "${url}" ]]; then
       rm::warn "prune: cannot resolve '${ns}/${release}' back to owner/repo (no local values file) — remove manually with repos:remove"
