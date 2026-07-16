@@ -102,6 +102,62 @@ wiring it up (GitHub App, per-repo scale-sets, size tiers, workflow
 homelab/small-team setups never get there. `runner-mesh` is that wiring,
 scripted, idempotent, and declared in git.
 
+## Why not just actions-runner-controller?
+
+ARC is the engine, and runner-mesh uses it unmodified — same charts, same
+controller, tracking upstream. What ARC deliberately doesn't provide is
+everything around it, and that's where most self-hosting attempts stall:
+
+| You need | Raw ARC | runner-mesh |
+|---|---|---|
+| GitHub auth | Create an App by hand, wire the secret yourself | `app:init` — one guided browser click |
+| Per-repo pools | Hand-written Helm values per repo | `repos:add owner/repo` (or declare in `repos.txt`) |
+| Size / hardware tiers | Invent your own convention | `owner/repo@large` → `runs-on: owner-repo-large` + nodeSelector |
+| Migrating existing workflows | Grep and hope | `repos:audit` (what's unreachable) + `repos:migrate --pr` |
+| Multi-machine config | Copy YAML between machines | Fleet repo: data + one pinned engine, `make apply` anywhere |
+| Secrets across machines | DIY | `fleet:seal` — SOPS+age encrypted in the repo, one hand-carried key |
+| Multi-machine networking | DIY | `net:init` + Tailscale-meshed k3s plans |
+
+If you already operate ARC happily with your own tooling, you don't need
+this. If you looked at ARC's docs and closed the tab — this is the
+missing operations layer.
+
+## CI for AI workloads: bring your own GPU
+
+GitHub-hosted runners don't have your GPU. Your desktop does — and model
+eval suites, CUDA builds, and local-LLM regression tests are exactly the
+jobs worth running on hardware you already own. Hardware tiers are named
+pools, so a GPU pool is one declaration:
+
+```bash
+# repos.txt
+your-org/your-model-repo@gpu
+```
+
+```yaml
+# values/your-org-your-model-repo-gpu.values.yaml
+template:
+  spec:
+    nodeSelector:
+      runner-mesh.dev/gpu: "true"     # label your GPU node accordingly
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        resources:
+          limits:
+            nvidia.com/gpu: 1          # requires the NVIDIA device plugin on that node
+```
+
+```yaml
+# your workflow
+jobs:
+  eval:
+    runs-on: your-org-your-model-repo-gpu
+```
+
+Jobs queue until the GPU node is online and drain the moment it is —
+same scale-to-zero semantics as every other pool.
+
 ## The fleet model
 
 All logic lives in this versioned engine; your config lives in a tiny
