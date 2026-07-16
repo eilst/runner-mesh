@@ -142,7 +142,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth}" \\
+  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
   sudo sh -
 
 # 3) Rename this machine on the tailnet to match its node name — k3s
@@ -195,7 +195,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth}" \\
+  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
   sudo sh -
 
 # 3) Rename this machine on the tailnet to match its node name:
