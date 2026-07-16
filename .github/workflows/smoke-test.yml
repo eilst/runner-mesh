@@ -18,13 +18,15 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+        with:
+          persist-credentials: false
 
       - name: install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
 
       - name: install helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
 
       # Fetches the k3d binary directly from GitHub Releases (no script
       # execution — just a binary, chmod'd and run later like any other

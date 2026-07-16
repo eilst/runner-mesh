@@ -1,5 +1,11 @@
 # runner-mesh
 
+[![lint](https://github.com/eilst/runner-mesh/actions/workflows/lint.yml/badge.svg)](https://github.com/eilst/runner-mesh/actions/workflows/lint.yml)
+[![smoke-test](https://github.com/eilst/runner-mesh/actions/workflows/smoke-test.yml/badge.svg)](https://github.com/eilst/runner-mesh/actions/workflows/smoke-test.yml)
+[![security](https://github.com/eilst/runner-mesh/actions/workflows/security.yml/badge.svg)](https://github.com/eilst/runner-mesh/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/eilst/runner-mesh/badge)](https://scorecard.dev/viewer/?uri=github.com/eilst/runner-mesh)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Ephemeral, autoscaling GitHub Actions runners on **your own** Kubernetes
 cluster — no fixed containers idling 24/7, no per-repo hand registration,
 scale-to-zero pools per repo (and per size tier), authenticated as a
