@@ -53,6 +53,9 @@ COMMANDS
   repos:list             List repos visible to the GitHub App and their status
   repos:add <repo>       Provision a runner scale-set for owner/repo
   repos:remove <repo>    Tear down the runner scale-set for owner/repo
+  repos:audit [path]     Scan a checkout's workflows: which runs-on targets
+                        actually reach a provisioned scale-set (name-only
+                        matching — label arrays never do)
   status                Show controller + per-repo runner pool health
 
   fleet:init [dir]       Scaffold a data-only fleet config repo (repos.txt,
@@ -106,6 +109,7 @@ main() {
     repos:list)          rm::repos::list "$@" ;;
     repos:add)           rm::repos::add "$@" ;;
     repos:remove)        rm::repos::remove "$@" ;;
+    repos:audit)         rm::repos::audit "$@" ;;
     status)             rm::status::run "$@" ;;
     fleet:init)          rm::fleet::init "$@" ;;
     fleet:apply)         rm::fleet::apply "$@" ;;
