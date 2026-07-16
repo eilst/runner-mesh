@@ -41,6 +41,36 @@ runner-mesh node:init --authkey <tailscale-auth-key>
 runner-mesh node:join --server runner-mesh-server --token <printed-token> --authkey <tailscale-auth-key>
 ```
 
+## macOS nodes (colima)
+
+k3s only runs on Linux, so on a Mac the cluster node lives inside a
+colima-managed Linux VM. `node:init`/`node:join`/`node:auto` detect
+macOS and prepend the colima steps to their printed plan automatically.
+The key points, because two of them are easy to get wrong:
+
+1. **Don't use `colima start --kubernetes` for meshed nodes.** That flag
+   installs colima's own bundled k3s *without* `--vpn-auth`, so it can
+   neither host nor join a Tailscale-meshed cluster. It's great for the
+   single-machine quickstart (`docs/quickstart-colima.md`) — but a meshed
+   node needs a plain `colima start`, then the k3s install from the
+   printed plan run inside `colima ssh`. Converting an existing
+   `--kubernetes` colima into a meshed server means redoing that VM's
+   k3s — plan for a brief teardown + `cluster:install`/`repos:add`
+   re-run (fast, since the GitHub App credentials are already on disk).
+2. **Tailscale runs inside the VM, not the macOS host.** k3s's
+   `--vpn-auth` drives the `tailscale` CLI in the same OS it runs in.
+   The Mac's own Tailscale app is only useful for `node:auto`'s
+   read-only "is there already a server?" discovery check.
+
+> **Validation status — read before relying on this:** the Linux
+> bare-metal path below matches k3s's documented `--vpn-auth` contract.
+> The macOS/colima variant (k3s + Tailscale inside a colima VM, meshed
+> across two Macs) has **not yet been validated end-to-end on real
+> hardware** by the authors. If you run it, expect possible rough edges
+> around the VM's NAT (Tailscale should traverse it — that's its job —
+> but this specific combination is unproven here) and please open an
+> issue with results either way.
+
 ## Why Tailscale here
 
 Home clusters have two connectivity problems ordinary LAN networking
