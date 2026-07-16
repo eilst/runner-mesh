@@ -20,7 +20,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Verified by actually running this against a live repo (`eilst/inventario`),
+Verified by actually running this against a live production repository,
 not just reading chart source: the **listener pod always lands in the
 controller's own namespace** (`arc-systems`), regardless of
 `RM_NAMESPACE_MODE` — this isn't something `runner-mesh` controls, it's how

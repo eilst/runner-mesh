@@ -55,7 +55,7 @@ rm::status::_repos() {
   while IFS=$'\t' read -r ns release; do
     [[ -z "${ns}" ]] && continue
     # The listener pod always lives in the CONTROLLER's namespace
-    # (verified by running this for real against eilst/inventario) — not
+    # (verified by running this for real against a live repository) — not
     # the repo's own namespace, regardless of RM_NAMESPACE_MODE. It's
     # precisely selectable by the scale-set's namespace+name labels, also
     # verified against a real listener pod's labels.
