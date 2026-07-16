@@ -117,15 +117,23 @@ rm::node::init() {
 command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} | sudo sh
 
 # 2) Install k3s as a server, joined to your tailnet as '${hostname}':
+#    (--vpn-auth stays unquoted on purpose: the value has no spaces, and
+#    embedded quotes end up escaped into the systemd unit, breaking k3s's
+#    vpn-auth parser with 'unknown parameter: name\\')
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=\\"${vpn_auth}\\"" \\
+  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth}" \\
   sudo sh -
 
-# 3) Confirm it's up:
+# 3) Rename this machine on the tailnet to match its node name — k3s
+#    registers under the OS hostname, but node discovery (node:auto) and
+#    join plans look the node up by '${hostname}':
+sudo tailscale set --hostname=${hostname}
+
+# 4) Confirm it's up:
 sudo systemctl status k3s --no-pager
 sudo cat /etc/rancher/k3s/k3s.yaml   # kubeconfig — merge into ~/.kube/config or use directly
 
-# 4) On every additional machine, run:
+# 5) On every additional machine, run:
 runner-mesh node:join --server ${hostname} --token ${token} --authkey ${authkey}
 EOF
   )"
@@ -162,17 +170,23 @@ rm::node::join() {
 command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} | sudo sh
 
 # 2) Install k3s as an agent, joined to your tailnet as '${hostname}':
+#    (--vpn-auth stays unquoted on purpose: the value has no spaces, and
+#    embedded quotes end up escaped into the systemd unit, breaking k3s's
+#    vpn-auth parser with 'unknown parameter: name\\')
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=\\"${vpn_auth}\\"" \\
+  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth}" \\
   sudo sh -
 
-# 3) Confirm it's up:
+# 3) Rename this machine on the tailnet to match its node name:
+sudo tailscale set --hostname=${hostname}
+
+# 4) Confirm it's up:
 sudo systemctl status k3s-agent --no-pager
 
-# 4) From the server (or a kubeconfig pointed at it), confirm the node joined:
+# 5) From the server (or a kubeconfig pointed at it), confirm the node joined:
 kubectl get nodes
 
-# 5) In the Tailscale admin console (Machines -> this node -> Disable key
+# 6) In the Tailscale admin console (Machines -> this node -> Disable key
 #    expiry): cluster nodes are servers, not laptops — expiring keys are
 #    the one way a Tailscale control-plane outage can eject a node.
 EOF
