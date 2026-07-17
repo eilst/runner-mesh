@@ -1,0 +1,26 @@
+# control-plane.yaml — the GitOps-declared control plane.
+#
+# Commit this to your fleet repo. It makes "which node is the control plane,
+# and where does it fail over to" versioned config instead of tribal
+# knowledge. node:watchdog and node:promote take the same values as flags;
+# this file is the single source of truth an operator (or a wrapper) reads
+# them from. Secrets (token, S3 keys) are NOT committed here — reference
+# them from the sealed fleet secret / terraform output / operator env.
+
+primary:  runner-mesh-azure-1        # the node that SHOULD be the control plane
+serverIP: 100.87.244.37              # the tailnet IP agents + kubeconfig target
+standby:  runner-mesh-macbook-m1     # promotion target if the primary is lost
+
+# Off-node snapshot store (from terraform/snapshot-bucket). Keys come from
+# `terraform output`, not this file.
+snapshots:
+  s3Endpoint: s3.us-east-1.amazonaws.com
+  s3Bucket:   runner-mesh-etcd-snapshots-xxxxxxxx
+  s3Region:   us-east-1
+  folder:     runner-mesh
+
+# Watchdog behaviour (see docs/control-plane-ha.md).
+watchdog:
+  autoPromote: false   # true = hands-off recovery; understand split-brain first
+  interval:    30       # seconds between primary health checks
+  fails:       4        # consecutive fails before acting

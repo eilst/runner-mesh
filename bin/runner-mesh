@@ -43,6 +43,8 @@ COMMANDS
                         tag ACL, OAuth client) — after it, auth keys mint
                         from the terminal and node:* needs no --authkey
   net:key                Mint a tagged single-use Tailscale auth key
+  net:ip                 Reassign a tailnet device's 100.x IP (API) — used to
+                        take over a control-plane IP hands-off on recovery
 
   node:init             Print the plan to bootstrap this machine as the
                         first k3s cluster node (Tailscale-meshed)
@@ -54,6 +56,9 @@ COMMANDS
                         a surviving node: restore the latest etcd snapshot
                         and take over the old server's tailnet IP (fast
                         recovery in minutes, not seamless failover)
+  node:watchdog          Print the plan to install a control-plane watchdog on
+                        a standby: watch the primary, alert (or --auto-promote
+                        via node:promote) on sustained loss
 
   cluster:install      Install/upgrade the Actions Runner Controller
   cluster:uninstall    Remove the controller (repos must be removed first)
@@ -120,6 +125,7 @@ main() {
     node:join)          rm::node::join "$@" ;;
     node:auto)           rm::node::auto "$@" ;;
     node:promote)        rm::node::promote "$@" ;;
+    node:watchdog)       rm::node::watchdog "$@" ;;
     cluster:install)   rm::cluster::install "$@" ;;
     cluster:uninstall) rm::cluster::uninstall "$@" ;;
     app:init)           rm::github_app::init "$@" ;;
@@ -135,6 +141,7 @@ main() {
     fleet:gitops)        rm::gitops::scaffold "$@" ;;
     net:init)            rm::net::init "$@" ;;
     net:key)             rm::net::key "$@" ;;
+    net:ip)              rm::net::ip "$@" ;;
     version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;
     -h|--help|help|"")  rm::usage ;;
     *)
