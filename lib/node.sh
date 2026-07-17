@@ -148,9 +148,13 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    cluster down (a greedy runner should be evicted; the API must survive).
 #    The reserved amounts are a fixed floor — a larger share on small nodes,
 #    where the risk is highest.
+#    NOTE: 'sudo env VAR=...' (not 'VAR=... sudo') — default sudoers
+#    env_reset silently strips a preceding assignment, so the installer
+#    would see no INSTALL_K3S_EXEC and bootstrap a bare standalone server
+#    (no --vpn-auth, wrong node name). 'sudo env' passes it through.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70 --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
-  sudo sh -
+  sudo env INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70 --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
+  sh -s -
 
 # 3) Rename this machine on the tailnet to match its node name — k3s
 #    registers under the OS hostname, but node discovery (node:auto) and
@@ -201,9 +205,13 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    NOTE: --vpn-auth stays unquoted on purpose. The value has no spaces,
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
+#    NOTE: 'sudo env VAR=...' (not 'VAR=... sudo') — default sudoers
+#    env_reset silently strips a preceding assignment, so the installer
+#    would see no INSTALL_K3S_EXEC and bootstrap a bare standalone server
+#    instead of this agent. 'sudo env' passes it through.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
-  sudo sh -
+  sudo env INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
+  sh -s -
 
 # 3) Rename this machine on the tailnet to match its node name:
 sudo tailscale set --hostname=${hostname}
