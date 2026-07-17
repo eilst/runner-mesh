@@ -8,3 +8,10 @@
 .idea/
 .vscode/
 *.log
+
+# terraform: state + provider cache + secrets stay local; lock file IS committed
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

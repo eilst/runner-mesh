@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (gitignored) to override defaults. All optional.
+
+# region          = "us-east-1"       # keep separate from your control plane's region
+# bucket_name     = ""                 # empty => runner-mesh-etcd-snapshots-<random>
+# snapshot_folder = "runner-mesh"
+# retention_days  = 30
