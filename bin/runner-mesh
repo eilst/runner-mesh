@@ -50,6 +50,10 @@ COMMANDS
   node:auto              Read-only discovery + print init or join plan,
                         whichever this machine needs (same 2 secrets
                         on every machine)
+  node:promote           Print the plan to recover a dead control plane onto
+                        a surviving node: restore the latest etcd snapshot
+                        and take over the old server's tailnet IP (fast
+                        recovery in minutes, not seamless failover)
 
   cluster:install      Install/upgrade the Actions Runner Controller
   cluster:uninstall    Remove the controller (repos must be removed first)
@@ -115,6 +119,7 @@ main() {
     node:init)          rm::node::init "$@" ;;
     node:join)          rm::node::join "$@" ;;
     node:auto)           rm::node::auto "$@" ;;
+    node:promote)        rm::node::promote "$@" ;;
     cluster:install)   rm::cluster::install "$@" ;;
     cluster:uninstall) rm::cluster::uninstall "$@" ;;
     app:init)           rm::github_app::init "$@" ;;
