@@ -103,6 +103,53 @@ rm::net::key() {
     || rm::die "key mint failed — is '${tag}' present in your ACL tagOwners?"
 }
 
+# rm::net::_device_id <hostname> — look up a tailnet device's stable ID by
+# its (short) hostname, via the API. Empty output + non-zero if not found.
+rm::net::_device_id() {
+  local hostname="$1" token
+  token="$(rm::net::_token)" || return 1
+  curl -fsS "${RM_TS_API}/tailnet/-/devices" \
+    -H "Authorization: Bearer ${token}" \
+    | jq -re --arg h "${hostname}" \
+      '.devices[] | select((.hostname == $h) or (.name | startswith($h + "."))) | .id' \
+    | head -1
+}
+
+# rm::net::reassign_ip <hostname> <ipv4> — move a tailnet device's 100.x
+# address to <ipv4> (the "Edit machine IP" action, via API). This is what
+# lets a promoted node take over a dead server's IP without the console —
+# so agents pointed at the old server_ip reconnect with no reconfig.
+# Requires an OAuth client (net:init). Prints nothing on success.
+rm::net::reassign_ip() {
+  local hostname="$1" ipv4="$2" token id
+  [[ -n "${hostname}" && -n "${ipv4}" ]] \
+    || rm::die "usage: rm::net::reassign_ip <device-hostname> <ipv4>"
+  rm::net::require_config
+  id="$(rm::net::_device_id "${hostname}")" \
+    || rm::die "no tailnet device found for hostname '${hostname}'"
+  token="$(rm::net::_token)" || rm::die "could not obtain a Tailscale API token"
+  curl -fsS -X POST "${RM_TS_API}/device/${id}/ip" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n --arg ip "${ipv4}" '{ipv4: $ip}')" >/dev/null \
+    || rm::die "failed to reassign ${ipv4} to '${hostname}' (is the old holder removed?)"
+  rm::ok "reassigned ${ipv4} to '${hostname}'"
+}
+
+# net:ip — CLI surface for reassign_ip, so the watchdog (and operators) can
+# take over a control-plane IP hands-off.
+rm::net::ip() {
+  local hostname="" ipv4=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --hostname) hostname="$2"; shift 2 ;;
+      --ip)       ipv4="$2"; shift 2 ;;
+      *) rm::die "unknown flag: $1" ;;
+    esac
+  done
+  rm::net::reassign_ip "${hostname}" "${ipv4}"
+}
+
 # Used by node:* — resolve an auth key: explicit flag wins; otherwise mint
 # one if an OAuth client is configured; otherwise fail with both paths.
 rm::net::resolve_authkey() {

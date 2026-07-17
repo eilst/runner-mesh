@@ -414,3 +414,122 @@ EOF
   rm::warn "the token above is a cluster-join secret — treat it like a password, don't commit it"
   rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
+
+# rm::node::watchdog — PLAN the install of a control-plane watchdog that
+# watches the primary server and, on sustained loss, recovers the cluster
+# onto a standby. This is the "automatic" trigger for node:promote — still
+# fast RECOVERY in minutes, not seamless failover, and honest about it:
+#
+#   * Install it ON THE STANDBY (self-promotion): the node that will take
+#     over is the one watching, so there's no third box to keep alive.
+#   * Default is ALERT-ONLY — detect + notify. --auto-promote opts into the
+#     destructive path (IP takeover via the Tailscale API + snapshot
+#     restore). Auto-promoting on a network partition (primary alive but
+#     unreachable) risks split-brain; the check uses a consecutive-failure
+#     threshold + grace, but on a small single-network fleet you should
+#     understand the tradeoff before enabling it.
+#   * Prerequisites on the standby for --auto-promote: runner-mesh on PATH,
+#     the fleet Tailscale OAuth credential (for the IP takeover), the
+#     cluster token, and a reachable off-node snapshot (node:init
+#     --snapshot-s3-*). A restore you've never rehearsed is not a plan.
+rm::node::watchdog() {
+  local primary="" standby="" token="" interval="30" fails="4" alert_cmd="" auto="false" write_to=""
+  local s3_flags_str="" hostname=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --primary)      primary="$2"; shift 2 ;;
+      --standby)      standby="$2"; shift 2 ;;
+      --hostname)     hostname="$2"; shift 2 ;;
+      --token)        token="$2"; shift 2 ;;
+      --interval)     interval="$2"; shift 2 ;;
+      --fails)        fails="$2"; shift 2 ;;
+      --alert-cmd)    alert_cmd="$2"; shift 2 ;;
+      --auto-promote) auto="true"; shift ;;
+      --snapshot-s3-flags) s3_flags_str="$2"; shift 2 ;;
+      --write-script) write_to="$2"; shift 2 ;;
+      *) rm::die "unknown flag: $1" ;;
+    esac
+  done
+  [[ -n "${primary}" && -n "${standby}" ]] \
+    || rm::die "usage: runner-mesh node:watchdog --primary <server-ip> --standby <node-name> [--token T] [--auto-promote] [--interval 30] [--fails 4] [--alert-cmd CMD] [--snapshot-s3-flags '...']"
+  [[ -n "${hostname}" ]] || hostname="${standby}"
+  [[ "${auto}" != "true" || -n "${token}" ]] \
+    || rm::die "--auto-promote needs --token (the cluster join token) so the standby can restore"
+
+  local promote_block alert_line mode_desc
+  mode_desc="alerts"; [[ "${auto}" == "true" ]] && mode_desc="auto-recovers"
+  alert_line="${alert_cmd:-logger -t rm-watchdog \"PRIMARY ${primary} DOWN — control plane needs recovery onto ${standby}\"}"
+  if [[ "${auto}" == "true" ]]; then
+    promote_block="$(cat <<PROMOTE
+  # --auto-promote: take over the primary's tailnet IP (API, no console),
+  # then restore the latest snapshot onto this standby. DESTRUCTIVE here by
+  # design. Guarded by the failure threshold above; still understand the
+  # split-brain risk on a partition.
+  runner-mesh net:ip --hostname "${hostname}" --ip "${primary}" || { logger -t rm-watchdog "IP takeover failed — aborting auto-promote"; exit 1; }
+  runner-mesh node:promote --to "${standby}" --server-ip "${primary}" --token "${token}" ${s3_flags_str} --write-script /tmp/rm-promote.sh
+  bash /tmp/rm-promote.sh
+  logger -t rm-watchdog "auto-promote of ${standby} completed"
+PROMOTE
+)"
+  else
+    promote_block="  logger -t rm-watchdog \"ALERT-ONLY: run 'runner-mesh node:promote --to ${standby} --server-ip ${primary} --token <token>' to recover\""
+  fi
+
+  local plan
+  plan="$(rm::node::_plan_block <<EOF
+# --- runner-mesh: control-plane watchdog (install ON the standby '${standby}') ---
+# Watches the primary server at ${primary} and ${mode_desc} on sustained
+# loss. Runs every ${interval}s; acts after ${fails} consecutive fails.
+
+# 1) The watchdog check script:
+sudo tee /usr/local/bin/rm-cp-watchdog >/dev/null <<'RMWD'
+#!/bin/bash
+set -euo pipefail
+PRIMARY="${primary}"; FAILS="${fails}"; STATE=/var/lib/rm-watchdog/fails
+mkdir -p "\$(dirname "\$STATE")"
+if curl -sk --max-time 5 "https://\${PRIMARY}:6443/readyz" 2>/dev/null | grep -q '^ok'; then
+  echo 0 > "\$STATE"; exit 0
+fi
+n=\$(( \$(cat "\$STATE" 2>/dev/null || echo 0) + 1 )); echo "\$n" > "\$STATE"
+if [ "\$n" -lt "\$FAILS" ]; then
+  logger -t rm-watchdog "primary \${PRIMARY} check failed (\$n/\$FAILS)"; exit 0
+fi
+# Primary considered DOWN.
+${alert_line}
+${promote_block}
+RMWD
+sudo chmod +x /usr/local/bin/rm-cp-watchdog
+
+# 2) systemd service + timer (every ${interval}s):
+sudo tee /etc/systemd/system/rm-cp-watchdog.service >/dev/null <<'RMSVC'
+[Unit]
+Description=runner-mesh control-plane watchdog
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rm-cp-watchdog
+RMSVC
+sudo tee /etc/systemd/system/rm-cp-watchdog.timer >/dev/null <<'RMTIMER'
+[Unit]
+Description=Run the runner-mesh control-plane watchdog periodically
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=${interval}
+AccuracySec=5
+[Install]
+WantedBy=timers.target
+RMTIMER
+sudo systemctl daemon-reload && sudo systemctl enable --now rm-cp-watchdog.timer
+
+# 3) Confirm it's scheduled:
+systemctl list-timers rm-cp-watchdog.timer --no-pager
+EOF
+  )"
+
+  rm::node::_emit_plan "${plan}" k3s
+  if [[ "${auto}" == "true" ]]; then
+    rm::warn "--auto-promote will restore + take over the IP automatically on sustained primary loss — rehearse it and understand the split-brain tradeoff first"
+    rm::warn "the token embedded above is a cluster secret — the written script is root-only; don't commit it"
+  fi
+  rm::node::_maybe_write_script "${write_to}" "${plan}"
+}
