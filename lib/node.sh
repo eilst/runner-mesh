@@ -61,6 +61,13 @@ rm::node::_macos_prelude() {
 #   printf '[Service]\\nExecStartPre=/bin/sh -c "until findmnt -n /var/lib/rancher >/dev/null; do sleep 1; done"\\nTimeoutStartSec=300\\n' \\
 #     | sudo tee /etc/systemd/system/${unit}.service.d/10-wait-datadisk.conf
 #   sudo systemctl daemon-reload && sudo systemctl restart ${unit}
+#
+# 0d) colima-specific: trim the VM's disks daily so freed space returns
+#     to the macOS host (colima's disks are sparse files that only grow —
+#     dind image churn fills the host disk without this):
+#   sudo mkdir -p /etc/systemd/system/fstrim.timer.d
+#   printf '[Timer]\\nOnCalendar=\\nOnCalendar=daily\\n' | sudo tee /etc/systemd/system/fstrim.timer.d/daily.conf
+#   sudo systemctl daemon-reload && sudo systemctl enable --now fstrim.timer
 # ────────────────────────────────────────────────────────────────────────
 
 EOF
@@ -135,7 +142,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth}" \\
+  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
   sudo sh -
 
 # 3) Rename this machine on the tailnet to match its node name — k3s
@@ -188,7 +195,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth}" \\
+  INSTALL_K3S_EXEC="agent --node-name ${hostname} --server https://${server}:6443 --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
   sudo sh -
 
 # 3) Rename this machine on the tailnet to match its node name:

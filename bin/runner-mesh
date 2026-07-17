@@ -21,7 +21,7 @@ export RM_ROOT
 
 # Each lib is sourced if present, so the CLI stays runnable while a command's
 # implementation lands in its own commit.
-for _rm_lib in log preflight cluster github_app net repos status node fleet migrate; do
+for _rm_lib in log preflight cluster github_app net repos status node fleet gitops migrate; do
   if [[ -f "${RM_ROOT}/lib/${_rm_lib}.sh" ]]; then
     # shellcheck source=/dev/null
     source "${RM_ROOT}/lib/${_rm_lib}.sh"
@@ -72,6 +72,8 @@ COMMANDS
   fleet:seal [dir]       Encrypt the GitHub App credentials into the fleet
                         repo (SOPS+age); apply auto-unseals on machines
                         holding the fleet age key
+  fleet:gitops [dir]     Generate a Flux CD layout in the fleet repo so the
+                        cluster reconciles itself from git (docs/gitops-flux.md)
   version               Print the runner-mesh version
 
 node:* commands never touch root/systemd themselves — they print the
@@ -125,6 +127,7 @@ main() {
     fleet:init)          rm::fleet::init "$@" ;;
     fleet:apply)         rm::fleet::apply "$@" ;;
     fleet:seal)          rm::fleet::seal "$@" ;;
+    fleet:gitops)        rm::gitops::scaffold "$@" ;;
     net:init)            rm::net::init "$@" ;;
     net:key)             rm::net::key "$@" ;;
     version)            printf 'runner-mesh %s\n' "$(cat "${RM_ROOT}/VERSION" 2>/dev/null || echo dev)" ;;

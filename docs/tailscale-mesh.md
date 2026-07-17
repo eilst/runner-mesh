@@ -95,7 +95,13 @@ The key points, because two of them are easy to get wrong:
 
    Tailscale-mesh traffic is unaffected — it tunnels directly into the
    VM and never touches lima's forwarder.
-5. **k3s must wait for colima's data disk** (the printed plans include
+5. **Trim colima's disks daily** (plans include this as step 0d). The
+   VM's disks are sparse files on the macOS host that only ever grow;
+   dind image churn can fill the host disk even when the VM has free
+   space. `fstrim` returns freed blocks to the host — the plans enable
+   Ubuntu's `fstrim.timer` daily. Emergency variant when the host is
+   already full: `colima ssh -- sudo fstrim -av` after pruning images.
+6. **k3s must wait for colima's data disk** (the printed plans include
    this as step 0c). colima mounts `/var/lib/rancher` from a separate
    disk *after* systemd starts k3s, so on the first VM reboot k3s races
    the mount, bootstraps a second cluster CA into the hidden rootfs, and
