@@ -141,8 +141,15 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    NOTE: --vpn-auth stays unquoted on purpose. The value has no spaces,
 #    and embedded quotes end up escaped into the systemd unit, which the
 #    vpn-auth parser then rejects with an unknown-parameter error.
+#    NOTE: kube-reserved/system-reserved/eviction-hard fence CPU+RAM off
+#    for the control plane so co-located runner pods can never OOM the API
+#    server. On a small or single-node cluster the server is ALSO a worker,
+#    so this is not optional — without it a CI burst takes the whole
+#    cluster down (a greedy runner should be evicted; the API must survive).
+#    The reserved amounts are a fixed floor — a larger share on small nodes,
+#    where the risk is highest.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70" \\
+  INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70 --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
   sudo sh -
 
 # 3) Rename this machine on the tailnet to match its node name — k3s
