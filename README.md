@@ -188,10 +188,16 @@ capacity, not configuration.
 
 The fleet repo can carry every operator credential **encrypted** (SOPS +
 age — the gitops-standard pattern): `fleet:seal` encrypts your GitHub App
-credentials and Tailscale OAuth client into `secrets/*.enc.json`, and
-`make apply` unseals them automatically on any machine holding the fleet
-**age key** — one line at `~/.config/runner-mesh/age.key`, carried
-hand-to-hand, never committed. That one line is the fleet's *secret
+credentials, Tailscale OAuth client, and — if you drop it at
+`~/.config/runner-mesh/kubeconfig.yaml` with `server:` pointing at the
+control plane's Tailscale IP — the cluster-admin kubeconfig, into
+`secrets/*.enc.{json,yaml}`. `make apply` unseals them automatically on
+any machine holding the fleet **age key** — one line at
+`~/.config/runner-mesh/age.key`, carried hand-to-hand, never committed.
+With the kubeconfig sealed, a new operator machine goes from `git clone`
++ age key to a working `make k9s` with zero extra steps. Never commit
+any of these files unencrypted — the plaintext kubeconfig is full
+cluster admin. That one line is the fleet's *secret
 zero*: every scheme needs at least one hand-carried credential; this
 design makes it exactly one, and makes it tiny.
 
@@ -239,6 +245,7 @@ them and tells you exactly what's missing.
 | `fleet:init [dir]` | Scaffold a data-only fleet config repo (repos, pins, values, shim, Makefile) |
 | `fleet:apply [dir] [--prune]` | Converge the cluster on the declared state; `--prune` removes undeclared pools |
 | `fleet:seal [dir]` | Encrypt operator credentials into the fleet repo (SOPS+age); `apply` auto-unseals |
+| `fleet:gitops [dir]` | Generate a Flux CD layout so the cluster reconciles itself from git — see [`docs/gitops-flux.md`](docs/gitops-flux.md) |
 | `net:init` | One guided Tailscale setup (account, tag ACL, OAuth client) |
 | `net:key` | Mint a tagged, single-use Tailscale auth key from the terminal |
 | `cluster:install` / `cluster:uninstall` | ARC controller lifecycle (cluster-wide, once) |
@@ -263,6 +270,8 @@ Global flags: `--yes`/`-y` (skip confirmations), `--dry-run`.
   local walkthrough
 - [`docs/onboarding.md`](docs/onboarding.md) — founding a fleet, adding
   worker/operator machines, the secret matrix, with a flow diagram
+- [`docs/gitops-flux.md`](docs/gitops-flux.md) — GitOps mode: Flux reconciles
+  the fleet from git, push-to-converge
 - [`docs/tailscale-mesh.md`](docs/tailscale-mesh.md) — joining multiple
   machines (including macOS-via-colima and roaming laptops) into one cluster
 - [`docs/security.md`](docs/security.md) — threat model and hardening
