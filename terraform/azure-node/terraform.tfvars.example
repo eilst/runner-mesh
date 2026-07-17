@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Or export
+# TF_VAR_cluster_token instead of writing it to disk at all.
+
+# k3s cluster token — on the mini:
+#   colima ssh -- sudo cat /var/lib/rancher/k3s/server/node-token
+cluster_token = "REPLACE-ME"
+server_ip     = "100.x.y.z"   # tailnet IP of your runner-mesh-server
+
+# node_name  = "runner-mesh-azure-1"
+# size_label = ""              # e.g. "large" on an amd64 size
+# vm_size    = "Standard_D4s_v5" # amd64; arm64: Standard_D4ps_v5 + sku server-arm64
+# location   = "canadacentral"
+# spot_enabled = false
