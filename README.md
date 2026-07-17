@@ -188,10 +188,16 @@ capacity, not configuration.
 
 The fleet repo can carry every operator credential **encrypted** (SOPS +
 age — the gitops-standard pattern): `fleet:seal` encrypts your GitHub App
-credentials and Tailscale OAuth client into `secrets/*.enc.json`, and
-`make apply` unseals them automatically on any machine holding the fleet
-**age key** — one line at `~/.config/runner-mesh/age.key`, carried
-hand-to-hand, never committed. That one line is the fleet's *secret
+credentials, Tailscale OAuth client, and — if you drop it at
+`~/.config/runner-mesh/kubeconfig.yaml` with `server:` pointing at the
+control plane's Tailscale IP — the cluster-admin kubeconfig, into
+`secrets/*.enc.{json,yaml}`. `make apply` unseals them automatically on
+any machine holding the fleet **age key** — one line at
+`~/.config/runner-mesh/age.key`, carried hand-to-hand, never committed.
+With the kubeconfig sealed, a new operator machine goes from `git clone`
++ age key to a working `make k9s` with zero extra steps. Never commit
+any of these files unencrypted — the plaintext kubeconfig is full
+cluster admin. That one line is the fleet's *secret
 zero*: every scheme needs at least one hand-carried credential; this
 design makes it exactly one, and makes it tiny.
 
