@@ -150,6 +150,16 @@ curl -sfL ${RM_K3S_INSTALL_URL} | \\
 #    join plans look the node up by '${hostname}':
 sudo tailscale set --hostname=${hostname}
 
+# 3b) Clamp TCP MSS to the path MTU, persistently. The tailscale mesh has
+#     a 1280-byte MTU while nested networks — docker-in-docker CI runners
+#     above all — default to 1500. Without the clamp, large packets from
+#     inner containers blackhole: TLS handshake timeouts on image pulls.
+sudo mkdir -p /etc/systemd/system/k3s.service.d
+printf '[Service]\nExecStartPost=/bin/sh -c "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"\n' \
+  | sudo tee /etc/systemd/system/k3s.service.d/20-mss-clamp.conf
+sudo systemctl daemon-reload
+sudo iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
 # 4) Confirm it's up:
 sudo systemctl status k3s --no-pager
 sudo cat /etc/rancher/k3s/k3s.yaml   # kubeconfig — merge into ~/.kube/config or use directly
@@ -200,6 +210,16 @@ curl -sfL ${RM_K3S_INSTALL_URL} | \\
 
 # 3) Rename this machine on the tailnet to match its node name:
 sudo tailscale set --hostname=${hostname}
+
+# 3b) Clamp TCP MSS to the path MTU, persistently. The tailscale mesh has
+#     a 1280-byte MTU while nested networks — docker-in-docker CI runners
+#     above all — default to 1500. Without the clamp, large packets from
+#     inner containers blackhole: TLS handshake timeouts on image pulls.
+sudo mkdir -p /etc/systemd/system/k3s-agent.service.d
+printf '[Service]\nExecStartPost=/bin/sh -c "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"\n' \
+  | sudo tee /etc/systemd/system/k3s-agent.service.d/20-mss-clamp.conf
+sudo systemctl daemon-reload
+sudo iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
 # 4) Confirm it's up:
 sudo systemctl status k3s-agent --no-pager
