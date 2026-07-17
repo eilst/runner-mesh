@@ -116,17 +116,58 @@ rm::node::_maybe_write_script() {
 
 rm::node::init() {
   local authkey="" hostname="${RM_NODE_HOSTNAME_DEFAULT}" token="" write_to=""
+  # Control-plane snapshots (see rm::node::promote for the recovery side).
+  # Defaults: embedded etcd + local snapshots every 6h, keep 20. Off-node
+  # S3/blob is opt-in — a snapshot that dies with the host protects nothing.
+  local snapshots="true" snap_cron="0 */6 * * *" snap_retention="20"
+  local s3_endpoint="" s3_bucket="" s3_folder="runner-mesh" s3_access="" s3_secret="" s3_region=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --authkey)      authkey="$2"; shift 2 ;;
-      --hostname)     hostname="$2"; shift 2 ;;
-      --token)        token="$2"; shift 2 ;;
-      --write-script) write_to="$2"; shift 2 ;;
+      --authkey)            authkey="$2"; shift 2 ;;
+      --hostname)           hostname="$2"; shift 2 ;;
+      --token)              token="$2"; shift 2 ;;
+      --write-script)       write_to="$2"; shift 2 ;;
+      --no-snapshots)       snapshots="false"; shift ;;
+      --snapshot-cron)      snap_cron="$2"; shift 2 ;;
+      --snapshot-retention) snap_retention="$2"; shift 2 ;;
+      --snapshot-s3-endpoint)   s3_endpoint="$2"; shift 2 ;;
+      --snapshot-s3-bucket)     s3_bucket="$2"; shift 2 ;;
+      --snapshot-s3-folder)     s3_folder="$2"; shift 2 ;;
+      --snapshot-s3-region)     s3_region="$2"; shift 2 ;;
+      --snapshot-s3-access-key) s3_access="$2"; shift 2 ;;
+      --snapshot-s3-secret-key) s3_secret="$2"; shift 2 ;;
       *) rm::die "unknown flag: $1" ;;
     esac
   done
   authkey="$(rm::net::resolve_authkey "${authkey}")"
   [[ -n "${token}" ]] || token="$(openssl rand -hex 32)"
+
+  # --cluster-init switches the datastore from the default sqlite to
+  # embedded etcd — required for scheduled/off-node snapshots AND the
+  # prerequisite for ever adding HA servers later. Harmless on a single
+  # node; slightly more RAM/disk I/O than sqlite, worth it for a control
+  # plane you want to be able to recover.
+  local cluster_init="" snapshot_step=""
+  if [[ "${snapshots}" == "true" ]]; then
+    cluster_init=" --cluster-init"
+    local s3_lines=""
+    if [[ -n "${s3_bucket}" ]]; then
+      s3_lines="$(printf 'etcd-s3: true\netcd-s3-endpoint: "%s"\netcd-s3-bucket: "%s"\netcd-s3-folder: "%s"\netcd-s3-region: "%s"\netcd-s3-access-key: "%s"\netcd-s3-secret-key: "%s"\n' \
+        "${s3_endpoint}" "${s3_bucket}" "${s3_folder}" "${s3_region}" "${s3_access}" "${s3_secret}")"
+    fi
+    snapshot_step="$(cat <<SNAP
+# 1b) Control-plane snapshots. Writes k3s config so etcd snapshots run on a
+#     schedule; ${s3_bucket:+off-node to S3 — the only kind that survives this host dying}${s3_bucket:-LOCAL ONLY — add --snapshot-s3-* so snapshots survive the host}.
+#     'runner-mesh node:promote' restores from these.
+sudo mkdir -p /etc/rancher/k3s
+sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null <<'RMSNAP'
+etcd-snapshot-schedule-cron: "${snap_cron}"
+etcd-snapshot-retention: ${snap_retention}
+${s3_lines}RMSNAP
+
+SNAP
+)"
+  fi
 
   local vpn_auth="name=tailscale,joinKey=${authkey}"
   local plan
@@ -137,6 +178,7 @@ rm::node::init() {
 # 1) Install the Tailscale client, if not already present:
 command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} | sudo sh
 
+${snapshot_step}
 # 2) Install k3s as a server, joined to your tailnet as '${hostname}':
 #    NOTE: --vpn-auth stays unquoted on purpose. The value has no spaces,
 #    and embedded quotes end up escaped into the systemd unit, which the
@@ -153,7 +195,7 @@ command -v tailscale >/dev/null 2>&1 || curl -fsSL ${RM_TAILSCALE_INSTALL_URL} |
 #    would see no INSTALL_K3S_EXEC and bootstrap a bare standalone server
 #    (no --vpn-auth, wrong node name). 'sudo env' passes it through.
 curl -sfL ${RM_K3S_INSTALL_URL} | \\
-  sudo env INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70 --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
+  sudo env INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token}${cluster_init} --vpn-auth=${vpn_auth} --kubelet-arg=image-gc-high-threshold=80 --kubelet-arg=image-gc-low-threshold=70 --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
   sh -s -
 
 # 3) Rename this machine on the tailnet to match its node name — k3s
@@ -278,4 +320,97 @@ runner-mesh server already exists on your tailnet. Install it, then re-run 'node
     rm::log "no existing server found — here's the plan to make this machine the server:"
     rm::node::init --authkey "${authkey}" --hostname "${hostname}" --token "${secret}" --write-script "${write_to}"
   fi
+}
+
+# rm::node::promote — PLAN the recovery of a dead control plane onto a
+# surviving node by restoring the latest etcd snapshot (from node:init's
+# schedule) and taking over the old server's tailnet identity, so agents
+# and every 'server_ip' reference keep working unchanged. This is FAST
+# RECOVERY (minutes), not seamless failover: it assumes the target node is
+# up and a recent snapshot exists. Like all node:* commands it only prints
+# the plan — the destructive --cluster-reset restore is yours to review and
+# run. Validate the restore on a throwaway cluster before you rely on it.
+rm::node::promote() {
+  local target="" server_ip="" token="" authkey="" snapshot="" hostname="" write_to=""
+  local s3_endpoint="" s3_bucket="" s3_folder="runner-mesh" s3_access="" s3_secret="" s3_region=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --to|--target)  target="$2"; shift 2 ;;
+      --server-ip)    server_ip="$2"; shift 2 ;;
+      --token)        token="$2"; shift 2 ;;
+      --authkey)      authkey="$2"; shift 2 ;;
+      --hostname)     hostname="$2"; shift 2 ;;
+      --snapshot)     snapshot="$2"; shift 2 ;;
+      --write-script) write_to="$2"; shift 2 ;;
+      --snapshot-s3-endpoint)   s3_endpoint="$2"; shift 2 ;;
+      --snapshot-s3-bucket)     s3_bucket="$2"; shift 2 ;;
+      --snapshot-s3-folder)     s3_folder="$2"; shift 2 ;;
+      --snapshot-s3-region)     s3_region="$2"; shift 2 ;;
+      --snapshot-s3-access-key) s3_access="$2"; shift 2 ;;
+      --snapshot-s3-secret-key) s3_secret="$2"; shift 2 ;;
+      *) rm::die "unknown flag: $1" ;;
+    esac
+  done
+  [[ -n "${target}" && -n "${server_ip}" && -n "${token}" ]] \
+    || rm::die "usage: runner-mesh node:promote --to <new-server-node-name> --server-ip <dead-server-tailnet-ip> --token <cluster-token> [--snapshot NAME] [--snapshot-s3-* ...] [--authkey KEY]"
+  [[ -n "${hostname}" ]] || hostname="${target}"
+  authkey="$(rm::net::resolve_authkey "${authkey}")"
+  local vpn_auth="name=tailscale,joinKey=${authkey}"
+
+  # S3 restore flags (when snapshots live off-node — the case that
+  # actually survives the old server's death).
+  local s3_flags="" restore_src="local snapshot"
+  if [[ -n "${s3_bucket}" ]]; then
+    s3_flags=" --etcd-s3 --etcd-s3-endpoint=${s3_endpoint} --etcd-s3-bucket=${s3_bucket} --etcd-s3-folder=${s3_folder} --etcd-s3-region=${s3_region} --etcd-s3-access-key=${s3_access} --etcd-s3-secret-key=${s3_secret}"
+    restore_src="S3 (${s3_bucket}/${s3_folder})"
+  fi
+  local restore_path="${snapshot:-<latest-snapshot-name>}"
+
+  local plan
+  plan="$(rm::node::_plan_block <<EOF
+# --- runner-mesh: promote '${target}' to control plane (disaster recovery) ---
+# The old server is gone; this restores its state from ${restore_src} onto
+# '${target}' and takes over its tailnet IP (${server_ip}) so agents and
+# every committed server_ip reference keep working. Run ON '${target}'.
+
+# 0) In the Tailscale admin console FIRST: remove the dead server's device,
+#    then reassign its IP ${server_ip} to '${target}' (Machines -> ${target}
+#    -> Edit machine IP). Tailnet IPs can't be moved from the CLI. Without
+#    this, agents (which target ${server_ip}) can't find the new server.
+
+# 1) If '${target}' is currently an agent, remove that role (keeps tailscaled):
+sudo /usr/local/bin/k3s-agent-uninstall.sh 2>/dev/null || true
+
+# 2) List available snapshots to pick --snapshot (skip if you already know it):
+sudo k3s etcd-snapshot list${s3_flags} 2>/dev/null || true
+
+# 3) Restore the snapshot into a fresh single-node control plane. This is
+#    DESTRUCTIVE on '${target}' (resets any local cluster state) — that's the
+#    point of recovery. --tls-san keeps the taken-over IP valid in the cert.
+sudo systemctl stop k3s k3s-agent 2>/dev/null || true
+curl -sfL ${RM_K3S_INSTALL_URL} | \\
+  sudo env INSTALL_K3S_EXEC="server --cluster-reset --cluster-reset-restore-path=${restore_path}${s3_flags}" \\
+  sh -s -
+
+# 4) Re-launch as a normal server with the same identity + hardening as
+#    node:init (token, IP takeover via --tls-san, snapshots, reservations):
+curl -sfL ${RM_K3S_INSTALL_URL} | \\
+  sudo env INSTALL_K3S_EXEC="server --node-name ${hostname} --token ${token} --cluster-init --tls-san ${server_ip} --vpn-auth=${vpn_auth} --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi --kubelet-arg=system-reserved=cpu=250m,memory=512Mi --kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%" \\
+  sh -s -
+sudo tailscale set --hostname=${hostname}
+
+# 5) Confirm the restored control plane is up and the node is Ready:
+sudo systemctl status k3s --no-pager
+sudo k3s kubectl get nodes -o wide
+
+# 6) Surviving agents point at ${server_ip} and reconnect automatically once
+#    the IP takeover (step 0) propagates. Any agent that had cached the old
+#    cluster CA must be re-joined: runner-mesh node:join --server ${server_ip} --token ${token}
+EOF
+  )"
+
+  rm::node::_emit_plan "${plan}" k3s
+  rm::warn "review the --cluster-reset restore before running — it is destructive on '${target}' by design"
+  rm::warn "the token above is a cluster-join secret — treat it like a password, don't commit it"
+  rm::node::_maybe_write_script "${write_to}" "${plan}"
 }
