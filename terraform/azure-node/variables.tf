@@ -45,6 +45,17 @@ variable "os_disk_gb" {
   default     = 128
 }
 
+variable "k3s_data_dir" {
+  description = "k3s --data-dir. Point it at the VM's LOCAL NVMe (/mnt on any D*d*/E*d* size) so container layers, kubelet, and every emptyDir live on local disk instead of the network-attached OS disk — the difference a checkout-heavy job like `npm ci` feels most. Empty = k3s default, /var/lib/rancher/k3s on the OS disk."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.k3s_data_dir == "" || startswith(var.k3s_data_dir, "/")
+    error_message = "k3s_data_dir must be an absolute path."
+  }
+}
+
 variable "spot_enabled" {
   description = "Run as a Spot VM (much cheaper, can be evicted — fine for CI capacity, not for the only large node)."
   type        = bool
