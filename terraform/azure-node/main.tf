@@ -115,6 +115,7 @@ resource "azurerm_linux_virtual_machine" "node" {
     server_ip         = var.server_ip
     cluster_token     = var.cluster_token
     size_label        = var.size_label
+    k3s_data_dir      = var.k3s_data_dir
     tailscale_authkey = tailscale_tailnet_key.node.key
   }))
 
