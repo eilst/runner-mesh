@@ -45,6 +45,28 @@ variable "os_disk_gb" {
   default     = 128
 }
 
+variable "kubelet_args" {
+  description = <<-EOT
+    Extra --kubelet-arg values, one per list entry, written to
+    /etc/rancher/k3s/config.yaml at first boot. The default caps image growth:
+    dind runners pull and build constantly, and a node that fills its disk stops
+    scheduling. Add reservations here on a node that also carries the control
+    plane, e.g. kube-reserved=cpu=500m,memory=1536Mi — a runner bursting to its
+    limit must never be able to starve the API server.
+  EOT
+  type        = list(string)
+  default = [
+    "image-gc-high-threshold=80",
+    "image-gc-low-threshold=70",
+  ]
+}
+
+variable "node_taint" {
+  description = "k3s --node-taint, e.g. workload=overflow:PreferNoSchedule. Set it here rather than with kubectl: a taint applied by hand is live cluster state and does not survive a re-join, which is how a whole fleet's jobs end up on the one node you meant to spare."
+  type        = string
+  default     = ""
+}
+
 variable "k3s_data_dir" {
   description = "k3s --data-dir. Point it at the VM's LOCAL NVMe (/mnt on any D*d*/E*d* size) so container layers, kubelet, and every emptyDir live on local disk instead of the network-attached OS disk — the difference a checkout-heavy job like `npm ci` feels most. Empty = k3s default, /var/lib/rancher/k3s on the OS disk."
   type        = string

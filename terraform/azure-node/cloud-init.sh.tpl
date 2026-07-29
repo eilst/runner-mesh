@@ -67,11 +67,37 @@ systemctl daemon-reload
 systemctl enable --now var-lib-kubelet.mount
 %{ endif }
 
+# 1c) Node hardening, applied before k3s so its first start already has it.
+#
+#    These are kubelet flags and an iptables rule, not Kubernetes objects, so
+#    no GitOps controller can reconcile them — if they are not written here they
+#    are written by hand, and the node that misses them is always the new one.
+%{ if length(kubelet_args) > 0 }
+mkdir -p /etc/rancher/k3s
+{
+  echo "kubelet-arg:"
+%{ for arg in kubelet_args ~}
+  echo "  - ${arg}"
+%{ endfor ~}
+} > /etc/rancher/k3s/config.yaml
+%{ endif }
+
+#    Clamp TCP MSS to the path MTU. Every node here joins over Tailscale, which
+#    caps at 1280, and docker-in-docker happily emits 1500-byte packets at it —
+#    they are silently black-holed, which reads as "TLS handshake timeout"
+#    pulling a base image rather than as a network fault. ExecStartPost so it
+#    survives reboots; the -C test keeps it idempotent.
+mkdir -p /etc/systemd/system/k3s-agent.service.d
+cat > /etc/systemd/system/k3s-agent.service.d/20-mss-clamp.conf <<'EOF'
+[Service]
+ExecStartPost=/bin/sh -c "iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+EOF
+
 # 2) k3s agent — joins cluster + tailnet in one step. Running as root:
 #    env survives (no sudo boundary), and --vpn-auth stays unquoted on
 #    purpose (embedded quotes corrupt the systemd unit).
 curl -sfL https://get.k3s.io | env \
-  INSTALL_K3S_EXEC="agent --node-name ${node_name} --server https://${server_ip}:6443 --token ${cluster_token}%{ if k3s_data_dir != "" } --data-dir ${k3s_data_dir}%{ endif }%{ if size_label != "" } --node-label runner-mesh.dev/size=${size_label}%{ endif } --vpn-auth=name=tailscale,joinKey=${tailscale_authkey}" \
+  INSTALL_K3S_EXEC="agent --node-name ${node_name} --server https://${server_ip}:6443 --token ${cluster_token}%{ if node_taint != "" } --node-taint ${node_taint}%{ endif }%{ if k3s_data_dir != "" } --data-dir ${k3s_data_dir}%{ endif }%{ if size_label != "" } --node-label runner-mesh.dev/size=${size_label}%{ endif } --vpn-auth=name=tailscale,joinKey=${tailscale_authkey}" \
   sh -s -
 
 # 3) Admin access rides the tailnet (subject to the ACL's ssh rules);
