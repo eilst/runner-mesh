@@ -34,11 +34,37 @@ if [ "$(stat -c %d /)" = "$(stat -c %d "$DATA_DIR")" ]; then
   lsblk || true
 fi
 
+# --data-dir only moves what k3s itself owns — containerd's image layers and
+# rootfs. kubelet's root is hardcoded to /var/lib/kubelet, and emptyDir volumes
+# live under it, which is precisely where a runner's workspace goes. So bind
+# /var/lib/kubelet onto the local disk too. A bind rather than
+# --kubelet-arg=root-dir keeps kubelet oblivious: nothing downstream has to know
+# the path moved.
+mkdir -p "$DATA_DIR/kubelet" /var/lib/kubelet
+cat > /etc/systemd/system/var-lib-kubelet.mount <<EOF
+[Unit]
+Description=kubelet state on the node's local disk
+RequiresMountsFor=$DATA_DIR
+Before=k3s-agent.service
+
+[Mount]
+What=$DATA_DIR/kubelet
+Where=/var/lib/kubelet
+Type=none
+Options=bind
+
+[Install]
+WantedBy=local-fs.target
+EOF
+
 mkdir -p /etc/systemd/system/k3s-agent.service.d
 cat > /etc/systemd/system/k3s-agent.service.d/10-data-dir-mount.conf <<EOF
 [Unit]
-RequiresMountsFor=$DATA_DIR
+RequiresMountsFor=$DATA_DIR /var/lib/kubelet
 EOF
+
+systemctl daemon-reload
+systemctl enable --now var-lib-kubelet.mount
 %{ endif }
 
 # 2) k3s agent — joins cluster + tailnet in one step. Running as root:
